@@ -64,6 +64,31 @@ function isHttpUrl(value: string): boolean {
 	}
 }
 
+function normalizeTwitterMediaUrl(value: string): string {
+	try {
+		const url = new URL(value);
+		if (url.hostname !== 'pbs.twimg.com' || !url.pathname.startsWith('/media/')) {
+			return value;
+		}
+		url.searchParams.set('name', 'orig');
+		return url.toString();
+	} catch {
+		return value;
+	}
+}
+
+function getDedupeKey(value: string): string {
+	try {
+		const url = new URL(value);
+		if (url.hostname === 'pbs.twimg.com' && url.pathname.startsWith('/media/')) {
+			return `${url.origin}${url.pathname}`;
+		}
+		return value;
+	} catch {
+		return value;
+	}
+}
+
 export function extractVisionImageCandidates(promptContext: string): VisionImageCandidate[] {
 	const block = getMarkedBlock(promptContext);
 	if (!block) return [];
@@ -73,10 +98,13 @@ export function extractVisionImageCandidates(promptContext: string): VisionImage
 
 	for (const field of FIELD_DEFINITIONS) {
 		const value = extractFirstUrlForMarker(block, field.marker);
-		if (!value || !isHttpUrl(value) || seen.has(value)) continue;
-		seen.add(value);
+		if (!value || !isHttpUrl(value)) continue;
+		const normalizedValue = normalizeTwitterMediaUrl(value);
+		const dedupeKey = getDedupeKey(normalizedValue);
+		if (seen.has(dedupeKey)) continue;
+		seen.add(dedupeKey);
 		candidates.push({
-			url: value,
+			url: normalizedValue,
 			source: field.source,
 			priority: field.priority,
 			index: field.index
