@@ -6,16 +6,18 @@ This fork keeps custom Interpreter work isolated from upstream Obsidian Web Clip
 
 - `main`
   Tracks/syncs with `upstream/main` in this fork.
+- `dev/interpreter-workflow`
+  Combined integration branch for local builds and ongoing custom Interpreter work.
 - `feature/interpreter-extra-api-params`
-  Generic advanced per-model API parameter support.
+  Historical/base branch for generic advanced per-model API parameter support.
 - `feature/interpreter-background-jobs`
-  Background Interpret & Add, job/session/rerun workflow.
+  Historical feature branch for Background Interpret & Add, job/session/rerun workflow.
 
 ## Golden Rule
 
 Do not make custom feature changes directly on `main`.
 
-Keep custom work isolated in feature branches, rebase those branches after syncing upstream, and push rebased feature branches with `--force-with-lease`, not plain `--force`.
+Keep custom work isolated outside `main`. Use `dev/interpreter-workflow` as the working integration branch for builds and day-to-day custom changes. Keep the historical feature branches only when you need to split or upstream a narrower change. Push rebased custom branches with `--force-with-lease`, not plain `--force`.
 
 ## Manual Sync Flow
 
@@ -29,6 +31,16 @@ git checkout main
 git merge --ff-only upstream/main
 git push origin main
 
+git checkout dev/interpreter-workflow
+git rebase main
+npm test
+npm run build
+git push --force-with-lease origin dev/interpreter-workflow
+```
+
+If you specifically need to preserve the old stacked feature branches, rebase them in order:
+
+```bash
 git checkout feature/interpreter-extra-api-params
 git rebase main
 npm test
