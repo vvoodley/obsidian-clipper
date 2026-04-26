@@ -8,12 +8,42 @@ import { Template } from '../types/types';
 const STORAGE_KEY = 'interpreter_jobs';
 const runningJobs = new Map<string, Promise<InterpreterJob>>();
 
+export interface StartInterpreterJobOptions {
+	forceNew?: boolean;
+}
+
+export interface InterpreterJobSnapshotValidationResult {
+	valid: boolean;
+	error?: string;
+	warnings?: string[];
+}
+
 function nowIso(): string {
 	return new Date().toISOString();
 }
 
-export function buildInterpreterJobKey(snapshot: Pick<InterpreterJobSnapshot, 'tabId' | 'url' | 'templateId' | 'modelId'>): string {
+export function buildInterpreterSessionKey(snapshot: Pick<InterpreterJobSnapshot, 'tabId' | 'url' | 'templateId' | 'modelId'>): string {
 	return `interpreter-job:${snapshot.tabId}:${snapshot.url}:${snapshot.templateId}:${snapshot.modelId}`;
+}
+
+export function buildInterpreterJobKey(snapshot: Pick<InterpreterJobSnapshot, 'tabId' | 'url' | 'templateId' | 'modelId'>): string {
+	return buildInterpreterSessionKey(snapshot);
+}
+
+function createRunId(): string {
+	return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeJob(job: InterpreterJob): InterpreterJob {
+	const sessionKey = job.sessionKey || job.key;
+	const runId = job.runId || job.id;
+	return {
+		...job,
+		id: job.id || runId,
+		runId,
+		sessionKey,
+		key: job.key || sessionKey
+	};
 }
 
 async function getJobs(): Promise<Record<string, InterpreterJob>> {
@@ -23,7 +53,8 @@ async function getJobs(): Promise<Record<string, InterpreterJob>> {
 
 async function saveJob(job: InterpreterJob): Promise<InterpreterJob> {
 	const jobs = await getJobs();
-	jobs[job.key] = job;
+	job = normalizeJob(job);
+	jobs[job.sessionKey] = job;
 	await browser.storage.local.set({ [STORAGE_KEY]: jobs });
 	try {
 		await browser.runtime.sendMessage({ action: 'interpreterJobUpdated', job });
@@ -35,7 +66,8 @@ async function saveJob(job: InterpreterJob): Promise<InterpreterJob> {
 
 export async function getInterpreterJob(key: string): Promise<InterpreterJob | undefined> {
 	const jobs = await getJobs();
-	return jobs[key];
+	const job = jobs[key];
+	return job ? normalizeJob(job) : undefined;
 }
 
 export async function clearInterpreterJob(key: string): Promise<void> {
@@ -99,7 +131,49 @@ async function saveToObsidianFromBackground(job: InterpreterJob, fileContent: st
 	await openObsidianUrlFromBackground(uriWithContent, job.snapshot.tabId);
 }
 
+function containsPromptVariables(text: string): boolean {
+	return /{{(?:prompt:)?"[\s\S]*?"(?:\|[\s\S]*?)?}}/.test(text);
+}
+
+function stripAllowedPromptVariables(text: string): string {
+	return text.replace(/{{(?:prompt:)?"[\s\S]*?"(?:\|[\s\S]*?)?}}/g, '');
+}
+
+export function validateInterpreterJobSnapshot(snapshot: InterpreterJobSnapshot): InterpreterJobSnapshotValidationResult {
+	if (!snapshot.url) {
+		return { valid: false, error: 'Could not fully capture the page. Stay on the source tab and retry.' };
+	}
+	if (!snapshot.noteName.trim()) {
+		return { valid: false, error: 'Could not fully capture the page. The note name is empty.' };
+	}
+
+	const fields = [
+		snapshot.noteName,
+		snapshot.path,
+		snapshot.noteContent,
+		snapshot.promptContext,
+		...snapshot.properties.map(property => property.value)
+	];
+	const combined = fields.join('\n');
+	const withoutPromptVariables = stripAllowedPromptVariables(combined);
+
+	if (/{{[\s\S]*?}}/.test(withoutPromptVariables) || /{%\s*[\s\S]*?%}/.test(combined)) {
+		return { valid: false, error: 'Could not fully capture the page. Stay on the source tab and retry.' };
+	}
+
+	if (!snapshot.noteContent.trim() && snapshot.properties.every(property => !String(property.value || '').trim())) {
+		return { valid: false, error: 'Could not fully capture the page. The note content is empty.' };
+	}
+
+	if (fields.some(containsPromptVariables) && !snapshot.promptContext.trim()) {
+		return { valid: false, error: 'Could not fully capture the page. Interpreter context is empty.' };
+	}
+
+	return { valid: true };
+}
+
 async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
+	job = normalizeJob(job);
 	job = await saveJob({ ...job, status: 'running', startedAt: job.startedAt || nowIso(), error: undefined });
 
 	try {
@@ -157,32 +231,47 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			completedAt: nowIso()
 		});
 	} finally {
-		runningJobs.delete(job.key);
+		runningJobs.delete(job.sessionKey);
 	}
 }
 
 export async function startInterpreterJob(
 	snapshot: InterpreterJobSnapshot,
-	addToObsidianWhenDone: boolean
+	addToObsidianWhenDone: boolean,
+	options: StartInterpreterJobOptions = {}
 ): Promise<InterpreterJob> {
-	const key = buildInterpreterJobKey(snapshot);
-	const existing = await getInterpreterJob(key);
-	if (existing && ['queued', 'running', 'completed', 'saved'].includes(existing.status)) {
-		if (['queued', 'running'].includes(existing.status) && !runningJobs.has(key)) {
-			runningJobs.set(key, runInterpreterJob(existing));
-		}
-		return existing;
+	const validation = validateInterpreterJobSnapshot(snapshot);
+	if (!validation.valid) {
+		throw new Error(validation.error || 'Could not fully capture the page. Stay on the source tab and retry.');
 	}
 
+	const sessionKey = buildInterpreterSessionKey(snapshot);
+	const existing = await getInterpreterJob(sessionKey);
+	if (existing) {
+		if (['queued', 'running'].includes(existing.status)) {
+			if (!runningJobs.has(sessionKey)) {
+				runningJobs.set(sessionKey, runInterpreterJob(existing));
+			}
+			return existing;
+		}
+
+		if (!options.forceNew) {
+			return existing;
+		}
+	}
+
+	const runId = createRunId();
 	const job: InterpreterJob = {
-		id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		key,
+		id: runId,
+		runId,
+		sessionKey,
+		key: sessionKey,
 		status: 'queued',
 		snapshot: { ...snapshot, createdAt: snapshot.createdAt || nowIso() },
 		addToObsidianWhenDone
 	};
 
 	await saveJob(job);
-	runningJobs.set(key, runInterpreterJob(job));
+	runningJobs.set(sessionKey, runInterpreterJob(job));
 	return job;
 }

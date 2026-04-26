@@ -7,7 +7,7 @@ import { compileTemplate } from '../utils/template-compiler';
 import { initializeIcons, getPropertyTypeIcon } from '../icons/icons';
 import { findMatchingTemplate, initializeTriggers } from '../utils/triggers';
 import { getLocalStorage, setLocalStorage, loadSettings, generalSettings, Settings } from '../utils/storage-utils';
-import { escapeHtml, unescapeValue } from '../utils/string-utils';
+import { escapeHtml, formatDuration, unescapeValue } from '../utils/string-utils';
 import { loadTemplates, createDefaultTemplate } from '../managers/template-manager';
 import browser from '../utils/browser-polyfill';
 import { addBrowserClassToHtml, detectBrowser } from '../utils/browser-detection';
@@ -23,7 +23,7 @@ import { sanitizeFileName } from '../utils/string-utils';
 import { saveFile } from '../utils/file-utils';
 import { translatePage, getMessage, setupLanguageAndDirection } from '../utils/i18n';
 import { formatPropertyValue } from '../utils/shared';
-import { buildInterpreterJobKey } from '../utils/interpreter-job-manager';
+import { buildInterpreterSessionKey, validateInterpreterJobSnapshot } from '../utils/interpreter-job-manager';
 
 interface ReaderModeResponse {
 	success: boolean;
@@ -580,10 +580,18 @@ function setupEventListeners(tabId: number) {
 	const interpretAndAddButton = document.getElementById('interpret-and-add-btn') as HTMLButtonElement | null;
 	if (interpretAndAddButton) {
 		interpretAndAddButton.addEventListener('click', () => {
-			startInterpretAndAddJob().catch((error) => {
+			const forceNew = interpretAndAddButton.dataset.forceNew === 'true';
+			startInterpretAndAddJob(forceNew).catch((error) => {
 				console.error('Error starting interpret-and-add job:', error);
 				showInterpreterStatus(error instanceof Error ? error.message : String(error), true);
 			});
+		});
+	}
+
+	const clearSessionButton = document.getElementById('clear-interpreter-session-btn') as HTMLButtonElement | null;
+	if (clearSessionButton) {
+		clearSessionButton.addEventListener('click', () => {
+			clearCurrentInterpreterSession().catch(error => console.warn('Unable to clear interpreter session:', error));
 		});
 	}
 }
@@ -652,6 +660,13 @@ function showInterpreterStatus(message: string, isError = false): void {
 	interpreterContainer?.classList.toggle('done', !isError && message.length > 0);
 	interpreterErrorMessage.textContent = message;
 	interpreterErrorMessage.style.display = message ? 'block' : 'none';
+}
+
+function setInterpreterTimer(message: string): void {
+	const timer = document.getElementById('interpreter-timer') as HTMLSpanElement | null;
+	if (!timer) return;
+	timer.textContent = message;
+	timer.style.display = message ? 'inline' : 'none';
 }
 
 function logError(message: string, error?: any): void {
@@ -885,10 +900,12 @@ function buildTemplateFieldsSkeleton(template: Template | null) {
 	const interpreterContainer = document.getElementById('interpreter');
 	const interpretBtn = document.getElementById('interpret-btn');
 	const interpretAndAddBtn = document.getElementById('interpret-and-add-btn');
+	const clearSessionButton = document.getElementById('clear-interpreter-session-btn');
 	const hasPromptVars = generalSettings.interpreterEnabled && collectPromptVariables(template).length > 0;
 	if (interpreterContainer) interpreterContainer.style.display = hasPromptVars ? 'flex' : 'none';
 	if (interpretBtn) interpretBtn.style.display = hasPromptVars ? 'inline-block' : 'none';
 	if (interpretAndAddBtn) interpretAndAddBtn.style.display = hasPromptVars ? 'inline-block' : 'none';
+	if (clearSessionButton) clearSessionButton.style.display = 'none';
 
 	// Populate model dropdown immediately (only needs generalSettings)
 	if (hasPromptVars) {
@@ -1081,13 +1098,20 @@ function restoreInterpretedJob(job: InterpreterJob): void {
 function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
 	if (!job) {
 		setInterpreterJobRunningState(false);
+		updateInterpretAndAddButton();
+		updateClearSessionButton();
+		setInterpreterTimer('');
 		return;
 	}
+
+	updateInterpretAndAddButton(job);
+	updateClearSessionButton(job);
+	setInterpreterTimer(getJobDurationMessage(job));
 
 	if (job.status === 'queued' || job.status === 'running') {
 		setInterpreterJobRunningState(true);
 		showInterpreterStatus('Interpreter running. You can close this popup and reopen it later.');
-		startInterpreterJobPolling(job.key);
+		startInterpreterJobPolling(job.sessionKey || job.key);
 		return;
 	}
 
@@ -1096,13 +1120,14 @@ function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
 
 	if (job.status === 'completed') {
 		restoreInterpretedJob(job);
-		showInterpreterStatus('Interpretation complete. Review and add to Obsidian when ready.');
+		showInterpreterStatus('Interpretation complete. Review and add to Obsidian when ready. To create separate notes on every run, use a timestamp in your template note name, e.g. {{title}} - {{time|date:"YYYYMMDD-HHmmss"}}.');
 		return;
 	}
 
 	if (job.status === 'saved') {
 		restoreInterpretedJob(job);
-		showInterpreterStatus('Added to Obsidian.');
+		const savedAt = job.savedAt ? ` at ${new Date(job.savedAt).toLocaleString()}` : '';
+		showInterpreterStatus(`Added to Obsidian${savedAt}. To create separate notes on every run, use a timestamp in your template note name, e.g. {{title}} - {{time|date:"YYYYMMDD-HHmmss"}}.`);
 		return;
 	}
 
@@ -1113,7 +1138,7 @@ function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
 
 async function getCurrentInterpreterJobKey(): Promise<string | undefined> {
 	const snapshot = await createInterpreterJobSnapshot();
-	return snapshot ? buildInterpreterJobKey(snapshot) : undefined;
+	return snapshot ? buildInterpreterSessionKey(snapshot) : undefined;
 }
 
 async function checkCurrentInterpreterJob(): Promise<void> {
@@ -1182,15 +1207,69 @@ function stopInterpreterJobPolling(): void {
 async function handleInterpreterJobUpdate(job: InterpreterJob | undefined): Promise<void> {
 	if (!job) return;
 	const key = await getCurrentInterpreterJobKey();
-	if (key === job.key) {
+	if (key === (job.sessionKey || job.key)) {
 		updateInterpreterJobUI(job);
 	}
 }
 
-async function startInterpretAndAddJob(): Promise<void> {
+function getJobDurationMessage(job: InterpreterJob): string {
+	const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : 0;
+	const completedAt = job.completedAt ? new Date(job.completedAt).getTime() : 0;
+	const savedAt = job.savedAt ? new Date(job.savedAt).getTime() : 0;
+	const now = Date.now();
+
+	if ((job.status === 'queued' || job.status === 'running') && startedAt) {
+		return `Running for ${formatDuration(now - startedAt)}`;
+	}
+	if (job.status === 'completed' && startedAt && completedAt) {
+		return `Completed in ${formatDuration(completedAt - startedAt)}`;
+	}
+	if (job.status === 'saved' && startedAt && (savedAt || completedAt)) {
+		return `Added to Obsidian in ${formatDuration((savedAt || completedAt) - startedAt)}`;
+	}
+	if (job.status === 'queued') return 'Queued...';
+	return '';
+}
+
+function updateInterpretAndAddButton(job?: InterpreterJob): void {
+	const button = document.getElementById('interpret-and-add-btn') as HTMLButtonElement | null;
+	if (!button) return;
+
+	const canRerun = job && ['completed', 'saved', 'error'].includes(job.status);
+	button.textContent = canRerun ? 'Reinterpret & Add Again' : 'Interpret & Add';
+	button.dataset.forceNew = canRerun ? 'true' : 'false';
+	button.disabled = !!job && ['queued', 'running'].includes(job.status);
+}
+
+function updateClearSessionButton(job?: InterpreterJob): void {
+	const button = document.getElementById('clear-interpreter-session-btn') as HTMLButtonElement | null;
+	if (!button) return;
+	button.style.display = job && ['completed', 'saved', 'error'].includes(job.status) ? 'inline-block' : 'none';
+}
+
+async function clearCurrentInterpreterSession(): Promise<void> {
+	const key = await getCurrentInterpreterJobKey();
+	if (!key) return;
+	await browser.runtime.sendMessage({ action: 'clearInterpreterJob', key });
+	stopInterpreterJobPolling();
+	updateInterpretAndAddButton();
+	updateClearSessionButton();
+	showInterpreterStatus('');
+	setInterpreterTimer('');
+}
+
+async function startInterpretAndAddJob(forceNew = false): Promise<void> {
+	showInterpreterStatus('Capturing page...');
+	setInterpreterTimer('Capturing page...');
+
 	const snapshot = await createInterpreterJobSnapshot();
 	if (!snapshot) {
 		throw new Error('Unable to create interpreter job snapshot.');
+	}
+
+	const validation = validateInterpreterJobSnapshot(snapshot);
+	if (!validation.valid) {
+		throw new Error(validation.error || 'Could not fully capture the page. Stay on the source tab and retry.');
 	}
 
 	const promptVariables = collectPromptVariables(currentTemplate);
@@ -1204,7 +1283,8 @@ async function startInterpretAndAddJob(): Promise<void> {
 	const response = await browser.runtime.sendMessage({
 		action: 'startInterpreterClipJob',
 		snapshot,
-		addToObsidianWhenDone: true
+		addToObsidianWhenDone: true,
+		forceNew
 	}) as { success?: boolean; job?: InterpreterJob; error?: string };
 
 	if (!response?.success || !response.job) {

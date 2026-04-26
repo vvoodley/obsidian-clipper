@@ -364,11 +364,12 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 		if (typedRequest.action === 'startInterpreterClipJob') {
 			const snapshot = (typedRequest as any).snapshot;
 			const addToObsidianWhenDone = (typedRequest as any).addToObsidianWhenDone === true;
+			const forceNew = (typedRequest as any).forceNew === true;
 			if (!snapshot) {
 				sendResponse({ success: false, error: 'Missing interpreter job snapshot' });
 				return true;
 			}
-			startInterpreterJob(snapshot, addToObsidianWhenDone)
+			startInterpreterJob(snapshot, addToObsidianWhenDone, { forceNew })
 				.then(job => sendResponse({ success: true, job }))
 				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
 			return true;
