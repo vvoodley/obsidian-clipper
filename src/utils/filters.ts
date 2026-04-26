@@ -47,6 +47,7 @@ import { table } from './filters/table';
 import { template, validateTemplateParams } from './filters/template';
 import { title } from './filters/title';
 import { trim } from './filters/trim';
+import { twitter_img_orig } from './filters/twitter_img_orig';
 import { uncamel } from './filters/uncamel';
 import { unescape } from './filters/unescape';
 import { unique } from './filters/unique';
@@ -121,6 +122,7 @@ export const filterMetadata: Record<string, FilterMetadata> = {
 	table: {},
 	title: {},
 	trim: {},
+	twitter_img_orig: {},
 	uncamel: {},
 	unescape: {},
 	unique: {},
@@ -178,6 +180,7 @@ export const filters: { [key: string]: FilterFunction } = {
 	template,
 	title,
 	trim,
+	twitter_img_orig,
 	uncamel,
 	unescape,
 	unique,
