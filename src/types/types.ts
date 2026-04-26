@@ -76,6 +76,7 @@ export interface Settings {
 	betaFeatures: boolean;
 	legacyMode: boolean;
 	silentOpen: boolean;
+	closeTabAfterInterpreterAdd: boolean;
 	openBehavior: 'popup' | 'embedded' | 'reader';
 	highlighterEnabled: boolean;
 	alwaysShowHighlights: boolean;
@@ -136,6 +137,7 @@ export interface InterpreterJob {
 	status: InterpreterJobStatus;
 	snapshot: InterpreterJobSnapshot;
 	addToObsidianWhenDone: boolean;
+	closeTabAfterSave?: boolean;
 	startedAt?: string;
 	completedAt?: string;
 	savedAt?: string;

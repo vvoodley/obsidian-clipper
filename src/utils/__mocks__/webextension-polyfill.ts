@@ -22,6 +22,9 @@ export const storage = {
 export const tabs = {
 	query: async () => [],
 	sendMessage: async () => ({}),
+	update: async () => ({}),
+	create: async () => ({}),
+	remove: async () => {},
 };
 
 export const i18n = {

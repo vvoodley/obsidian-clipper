@@ -71,6 +71,8 @@ Keep changes generic where possible to ease future upstream PRs.
 
 Duplicate filenames and new copies should be controlled by template `noteNameFormat` and behavior. The extension should not append numeric suffixes like `(1)`, `(2)`, or `(3)`.
 
+Templates and prompt text are stored in browser `storage.sync`; template-level Interpreter context and prompt content are part of the template. Use the native Web Clipper template import/export UI to back up templates. Do not store API keys or other secrets in prompt/template backups.
+
 ## Future-Agent Instructions
 
 - Always inspect current branch state first.
