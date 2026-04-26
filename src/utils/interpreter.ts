@@ -7,6 +7,7 @@ import { adjustNoteNameHeight } from './ui-utils';
 import { debugLog } from './debug';
 import { getMessage } from './i18n';
 import { updateTokenCount } from './token-counter';
+import { mergeExtraRequestBody } from './extra-request-body';
 
 const RATE_LIMIT_RESET_TIME = 60000; // 1 minute in milliseconds
 let lastRequestTime = 0;
@@ -153,6 +154,7 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 			};
 		}
 
+		requestBody = mergeExtraRequestBody(requestBody, model.extraRequestBody);
 		debugLog('Interpreter', `Sending request to ${provider.name} API:`, requestBody);
 
 		const response = await fetch(requestUrl, {

@@ -105,6 +105,7 @@ export interface ModelConfig {
 	providerModelId: string;
 	name: string;
 	enabled: boolean;
+	extraRequestBody?: Record<string, unknown>;
 }
 
 export interface HistoryEntry {
