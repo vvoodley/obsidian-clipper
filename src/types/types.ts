@@ -130,6 +130,8 @@ export interface InterpreterJobSnapshot {
 
 export interface InterpreterJob {
 	id: string;
+	runId: string;
+	sessionKey: string;
 	key: string;
 	status: InterpreterJobStatus;
 	snapshot: InterpreterJobSnapshot;

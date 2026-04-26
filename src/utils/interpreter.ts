@@ -9,9 +9,6 @@ import { getMessage } from './i18n';
 import { updateTokenCount } from './token-counter';
 import { mergeExtraRequestBody } from './extra-request-body';
 
-const RATE_LIMIT_RESET_TIME = 60000; // 1 minute in milliseconds
-let lastRequestTime = 0;
-
 // Store event listeners for cleanup
 const eventListeners = new WeakMap<HTMLElement, { [key: string]: EventListener }>();
 
@@ -27,11 +24,6 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 	// Only check for API key if the provider requires it
 	if (provider.apiKeyRequired && !provider.apiKey) {
 		throw new Error(`API key is not set for provider ${provider.name}`);
-	}
-
-	const now = Date.now();
-	if (now - lastRequestTime < RATE_LIMIT_RESET_TIME) {
-		throw new Error(`Rate limit cooldown. Please wait ${Math.ceil((RATE_LIMIT_RESET_TIME - (now - lastRequestTime)) / 1000)} seconds before trying again.`);
 	}
 
 	try {
@@ -190,8 +182,6 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 		}
 
 		debugLog('Interpreter', `Parsed ${provider.name} response:`, data);
-
-		lastRequestTime = now;
 
 		let llmResponseContent: string;
 		if (provider.name.toLowerCase().includes('anthropic')) {
