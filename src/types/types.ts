@@ -45,6 +45,8 @@ export interface Provider {
 	presetId?: string;
 }
 
+export type VisionImageMode = 'none' | 'url' | 'data_url' | 'auto';
+
 export interface Rating {
 	rating: number;
 	date: string;
@@ -107,6 +109,10 @@ export interface ModelConfig {
 	name: string;
 	enabled: boolean;
 	extraRequestBody?: Record<string, unknown>;
+	visionEnabled?: boolean;
+	visionImageMode?: VisionImageMode;
+	maxVisionImages?: number;
+	maxVisionImageBytes?: number;
 }
 
 export type InterpreterJobStatus = 'queued' | 'running' | 'completed' | 'saved' | 'error';
@@ -170,6 +176,12 @@ export interface InterpreterJob {
 		responseChars?: number;
 		saveStartedAt?: string;
 		savedAt?: string;
+		visionEnabled?: boolean;
+		visionCandidateCount?: number;
+		visionAttachedCount?: number;
+		visionImageMode?: VisionImageMode;
+		visionSources?: string[];
+		visionWarnings?: string[];
 	};
 	promptResponses?: any[];
 	interpreted?: {

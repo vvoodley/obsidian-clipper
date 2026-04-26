@@ -1,0 +1,86 @@
+import type { VisionImageCandidate, VisionImageSource } from './image-types';
+
+const START_MARKER = 'VISION_IMAGE_URLS_START';
+const END_MARKER = 'VISION_IMAGE_URLS_END';
+
+const FIELD_DEFINITIONS: Array<{ marker: string; source: VisionImageSource; priority: number }> = [
+	{ marker: 'MAIN_POST_FIRST_IMAGE', source: 'main_post', priority: 1 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_FIRST_IMAGE', source: 'quoted_or_embedded_post', priority: 2 }
+];
+
+function getMarkedBlock(promptContext: string): string | undefined {
+	const startIndex = promptContext.indexOf(START_MARKER);
+	if (startIndex === -1) return undefined;
+	const contentStart = startIndex + START_MARKER.length;
+	const endIndex = promptContext.indexOf(END_MARKER, contentStart);
+	if (endIndex === -1) return undefined;
+	return promptContext.slice(contentStart, endIndex);
+}
+
+function cleanUrlCandidate(value: string): string {
+	let cleaned = value.trim();
+	const markdownImageMatch = cleaned.match(/^!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)$/);
+	if (markdownImageMatch) {
+		cleaned = markdownImageMatch[1];
+	}
+	cleaned = cleaned.trim().replace(/^[<"'`]+/, '').replace(/[>"'`]+$/, '');
+	return cleaned;
+}
+
+function extractFirstUrlForMarker(block: string, marker: string): string | undefined {
+	const markerRegex = new RegExp(`^\\s*${marker}\\s*:\\s*(.*)$`, 'im');
+	const markerMatch = block.match(markerRegex);
+	if (!markerMatch) return undefined;
+
+	const lineValue = markerMatch[1] || '';
+	const sameLineUrl = cleanUrlCandidate(lineValue);
+	if (sameLineUrl) return sameLineUrl;
+
+	const afterMarker = block.slice((markerMatch.index || 0) + markerMatch[0].length);
+	for (const line of afterMarker.split(/\r?\n/)) {
+		if (/^\s*[A-Z0-9_]+\s*:/.test(line)) break;
+		const candidate = cleanUrlCandidate(line);
+		if (candidate) return candidate;
+	}
+	return undefined;
+}
+
+function isHttpUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === 'http:' || url.protocol === 'https:';
+	} catch {
+		return false;
+	}
+}
+
+export function extractVisionImageCandidates(promptContext: string): VisionImageCandidate[] {
+	const block = getMarkedBlock(promptContext);
+	if (!block) return [];
+
+	const seen = new Set<string>();
+	const candidates: VisionImageCandidate[] = [];
+
+	for (const field of FIELD_DEFINITIONS) {
+		const value = extractFirstUrlForMarker(block, field.marker);
+		if (!value || !isHttpUrl(value) || seen.has(value)) continue;
+		seen.add(value);
+		candidates.push({
+			url: value,
+			source: field.source,
+			priority: field.priority
+		});
+	}
+
+	return candidates.slice(0, 2);
+}
+
+export function selectVisionImageCandidates(
+	candidates: VisionImageCandidate[],
+	maxImages = 2
+): VisionImageCandidate[] {
+	const limit = Math.max(0, Math.min(2, maxImages));
+	return [...candidates]
+		.sort((a, b) => a.priority - b.priority)
+		.slice(0, limit);
+}

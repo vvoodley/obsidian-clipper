@@ -826,6 +826,37 @@
 						</div>
 						<div class="setting-item">
 							<div class="setting-item-info">
+								<label for="vision-enabled">Enable vision image inputs</label>
+								<div class="setting-item-description">Vision image inputs attach the first main post image and first quoted/embedded post image when a template captures them. If no image is found, the Interpreter runs text-only.</div>
+							</div>
+							<div class="setting-item-control">
+								<input type="checkbox" id="vision-enabled" name="visionEnabled">
+							</div>
+						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
+								<label for="vision-image-mode">Image input mode</label>
+								<div class="setting-item-description">URL mode sends captured remote image URLs. Data URL and Auto are reserved for future fallback support.</div>
+							</div>
+							<div class="setting-item-control">
+								<select id="vision-image-mode" name="visionImageMode">
+									<option value="url">URL (recommended)</option>
+									<option value="data_url" disabled>Data URL (future/experimental)</option>
+									<option value="auto" disabled>Auto (future/experimental)</option>
+								</select>
+							</div>
+						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
+								<label for="max-vision-images">Max images per request</label>
+								<div class="setting-item-description">Limited to 2 for this workflow: first main post image and first quoted/embedded post image.</div>
+							</div>
+							<div class="setting-item-control">
+								<input type="number" id="max-vision-images" name="maxVisionImages" min="0" max="2" value="2">
+							</div>
+						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
 								<label for="extra-request-body">Extra API parameters JSON</label>
 								<div class="setting-item-description">Optional advanced JSON object merged into the request body for this model. Use for provider-specific options like reasoning_effort, thinking, temperature, max_tokens, or response_format. Do not include secrets. The keys "model" and "messages" cannot be overridden.</div>
 							</div>

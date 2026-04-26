@@ -8,13 +8,26 @@ import { debugLog } from './debug';
 import { getMessage } from './i18n';
 import { updateTokenCount } from './token-counter';
 import { mergeExtraRequestBody } from './extra-request-body';
+import { buildProviderRequest } from './llm/provider-request';
+import { prepareVisionInputsFromPromptContext } from './media/image-attachments';
+import type { VisionImageAttachment } from './media/image-types';
 
 // Store event listeners for cleanup
 const eventListeners = new WeakMap<HTMLElement, { [key: string]: EventListener }>();
 export const DEFAULT_LLM_TIMEOUT_MS = 300_000;
 export const LLM_TIMEOUT_ERROR_MESSAGE = 'AI provider timed out after 300 seconds.';
 
-export async function sendToLLM(promptContext: string, content: string, promptVariables: PromptVariable[], model: ModelConfig): Promise<{ promptResponses: any[]; responseChars?: number }> {
+export async function sendToLLM(
+	promptContext: string,
+	content: string,
+	promptVariables: PromptVariable[],
+	model: ModelConfig,
+	options?: {
+		visionImages?: VisionImageAttachment[];
+		visionCandidateCount?: number;
+		visionWarnings?: string[];
+	}
+): Promise<{ promptResponses: any[]; responseChars?: number }> {
 	debugLog('Interpreter', 'Sending request to LLM...');
 	
 	// Find the provider for this model
@@ -48,47 +61,18 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 		if (provider.name.toLowerCase().includes('hugging')) {
 			// Replace {model-id} in baseUrl with the actual model ID
 			requestUrl = provider.baseUrl.replace('{model-id}', model.providerModelId);
-			requestBody = {
-				model: model.providerModelId,
-				messages: [
-					{ role: 'system', content: systemContent },
-					{ role: 'user', content: `${promptContext}` },
-					{ role: 'user', content: `${JSON.stringify(promptContent)}` }
-				],
-				max_tokens: 1600,
-				stream: false
-			};					
 			headers = {
 				...headers,
 				'Authorization': `Bearer ${provider.apiKey}`
 			};
 		} else if (provider.baseUrl.includes('openai.azure.com')) {
 			requestUrl = provider.baseUrl;
-			requestBody = {
-				messages: [
-					{ role: 'system', content: systemContent },
-					{ role: 'user', content: `${promptContext}` },
-					{ role: 'user', content: `${JSON.stringify(promptContent)}` }
-				],
-				max_tokens: 1600,
-				stream: false
-			};
 			headers = {
 				...headers,
 				'api-key': provider.apiKey
 			};
 		} else if (provider.name.toLowerCase().includes('anthropic')) {
 			requestUrl = provider.baseUrl;
-			requestBody = {
-				model: model.providerModelId,
-				max_tokens: 1600,
-				messages: [
-					{ role: 'user', content: `${promptContext}` },
-					{ role: 'user', content: `${JSON.stringify(promptContent)}` }
-				],
-				temperature: 0.5,
-				system: systemContent
-			};
 			headers = {
 				...headers,
 				'x-api-key': provider.apiKey,
@@ -97,18 +81,6 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 			};
 		} else if (provider.name.toLowerCase().includes('perplexity')) {
 			requestUrl = provider.baseUrl;
-			requestBody = {
-				model: model.providerModelId,
-				max_tokens: 1600,
-				messages: [
-					{ role: 'system', content: systemContent },
-					{ role: 'user', content: `
-						"${promptContext}"
-						"${JSON.stringify(promptContent)}"`
-					}
-				],
-				temperature: 0.3
-			};
 			headers = {
 				...headers,
 				'HTTP-Referer': 'https://obsidian.md/',
@@ -117,29 +89,9 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 			};
 		} else if (provider.name.toLowerCase().includes('ollama')) {
 			requestUrl = provider.baseUrl;
-			requestBody = {
-				model: model.providerModelId,
-				messages: [
-					{ role: 'system', content: systemContent },
-					{ role: 'user', content: `${promptContext}` },
-					{ role: 'user', content: `${JSON.stringify(promptContent)}` }
-				],
-				format: 'json',
-				num_ctx: 120000,
-				temperature: 0.5,
-				stream: false
-			};
 		} else {
 			// Default request format
 			requestUrl = provider.baseUrl;
-			requestBody = {
-				model: model.providerModelId,
-				messages: [
-					{ role: 'system', content: systemContent },
-					{ role: 'user', content: `${promptContext}` },
-					{ role: 'user', content: `${JSON.stringify(promptContent)}` }
-				]
-			};
 			headers = {
 				...headers,
 				'HTTP-Referer': 'https://obsidian.md/',
@@ -148,8 +100,34 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 			};
 		}
 
+		const builtRequest = buildProviderRequest({
+			provider,
+			model,
+			systemContent,
+			promptContext,
+			promptContent,
+			visionImages: options?.visionImages,
+			visionCandidateCount: options?.visionCandidateCount
+		});
+		requestBody = builtRequest.requestBody;
+		const visionWarnings = Array.from(new Set([
+			...(options?.visionWarnings || []),
+			...builtRequest.warnings
+		]));
+		for (const warning of visionWarnings) {
+			console.warn(warning);
+		}
+
 		requestBody = mergeExtraRequestBody(requestBody, model.extraRequestBody);
-		debugLog('Interpreter', `Sending request to ${provider.name} API:`, requestBody);
+		debugLog('Interpreter', `Sending request to ${provider.name} API:`, {
+			model: requestBody.model,
+			messageCount: Array.isArray(requestBody.messages) ? requestBody.messages.length : undefined,
+			vision: {
+				supportsVision: builtRequest.supportsVision,
+				attachedImageCount: builtRequest.attachedImageCount,
+				sources: options?.visionImages?.map(image => image.source) || []
+			}
+		});
 
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), DEFAULT_LLM_TIMEOUT_MS);
@@ -605,7 +583,12 @@ export async function handleInterpreterUI(
 			responseTimer.textContent = formatDuration(elapsedTime);
 		}, 10);
 
-		const { promptResponses } = await sendToLLM(contextToUse, contentToProcess, promptVariables, modelConfig);
+		const visionInputs = prepareVisionInputsFromPromptContext(contextToUse, modelConfig);
+		const { promptResponses } = await sendToLLM(contextToUse, contentToProcess, promptVariables, modelConfig, {
+			visionImages: visionInputs.visionImages,
+			visionCandidateCount: visionInputs.candidateCount,
+			visionWarnings: visionInputs.warnings
+		});
 		debugLog('Interpreter', 'LLM response:', { promptResponses });
 
 		// Stop the timer and update UI

@@ -1,5 +1,5 @@
 import { initializeToggles, initializeSettingToggle } from '../utils/ui-utils';
-import { ModelConfig, Provider } from '../types/types';
+import { ModelConfig, Provider, VisionImageMode } from '../types/types';
 import { generalSettings, loadSettings, saveSettings, getLocalStorage, setLocalStorage } from '../utils/storage-utils';
 import { initializeIcons } from '../icons/icons';
 import { showModal, hideModal } from '../utils/modal-utils';
@@ -803,7 +803,11 @@ function addModelToList(event: Event) {
 		providerId: '',
 		providerModelId: '',
 		name: '',
-		enabled: true
+		enabled: true,
+		visionEnabled: false,
+		visionImageMode: 'url',
+		maxVisionImages: 2,
+		maxVisionImageBytes: 5_000_000
 	};
 	showModelModal(newModel);
 }
@@ -839,8 +843,11 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		const nameInput = form.querySelector('[name="name"]') as HTMLInputElement;
 		const providerModelIdInput = form.querySelector('[name="providerModelId"]') as HTMLInputElement;
 		const extraRequestBodyInput = form.querySelector('[name="extraRequestBody"]') as HTMLTextAreaElement;
+		const visionEnabledInput = form.querySelector('[name="visionEnabled"]') as HTMLInputElement;
+		const visionImageModeSelect = form.querySelector('[name="visionImageMode"]') as HTMLSelectElement;
+		const maxVisionImagesInput = form.querySelector('[name="maxVisionImages"]') as HTMLInputElement;
 
-		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect || !extraRequestBodyInput) {
+		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect || !extraRequestBodyInput || !visionEnabledInput || !visionImageModeSelect || !maxVisionImagesInput) {
 			console.error('Required model modal form elements not found');
 			return;
 		}
@@ -867,6 +874,9 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		nameInput.value = '';
 		providerModelIdInput.value = '';
 		extraRequestBodyInput.value = model.extraRequestBody ? JSON.stringify(model.extraRequestBody, null, 2) : '';
+		visionEnabledInput.checked = model.visionEnabled === true;
+		visionImageModeSelect.value = model.visionImageMode || 'url';
+		maxVisionImagesInput.value = String(Math.max(0, Math.min(2, model.maxVisionImages ?? 2)));
 		nameInput.disabled = true;
 		providerModelIdInput.disabled = true;
 		modelSelectionContainer.style.display = 'none';
@@ -1036,7 +1046,11 @@ async function showModelModal(model: ModelConfig, index?: number) {
 				providerId: selectedProviderId,
 				providerModelId: '',
 				name: '',
-				enabled: model.enabled
+				enabled: model.enabled,
+				visionEnabled: formData.get('visionEnabled') === 'on',
+				visionImageMode: (formData.get('visionImageMode') as VisionImageMode) || 'url',
+				maxVisionImages: Math.max(0, Math.min(2, Number(formData.get('maxVisionImages') || 2))),
+				maxVisionImageBytes: model.maxVisionImageBytes ?? 5_000_000
 			};
 
 			updatedModel.name = formData.get('name') as string;

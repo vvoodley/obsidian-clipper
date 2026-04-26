@@ -5,6 +5,7 @@ import { sendToLLM, collectPromptVariablesFromTemplate, applyPromptResponsesToSn
 import { generateFrontmatter, buildObsidianUrl } from './obsidian-note-creator';
 import { Template } from '../types/types';
 import type { InterpreterJobPhase } from '../types/types';
+import { prepareVisionInputsFromPromptContext } from './media/image-attachments';
 
 const STORAGE_KEY = 'interpreter_jobs';
 const runningJobs = new Map<string, Promise<InterpreterJob>>();
@@ -239,6 +240,7 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			context: job.snapshot.promptContext
 		};
 		const promptVariables = collectPromptVariablesFromTemplate(template);
+		const visionInputs = prepareVisionInputsFromPromptContext(job.snapshot.promptContext, model);
 		job = await saveJobPhase(job, 'sending_to_provider', {
 			metrics: {
 				...job.metrics,
@@ -247,7 +249,13 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 				promptContextChars: job.snapshot.promptContext.length,
 				contentChars: (job.snapshot.variables.content || '').length,
 				promptVariableCount: promptVariables.length,
-				requestStartedAt: nowIso()
+				requestStartedAt: nowIso(),
+				visionEnabled: model.visionEnabled === true,
+				visionCandidateCount: visionInputs.candidateCount,
+				visionAttachedCount: visionInputs.visionImages.length,
+				visionImageMode: model.visionImageMode || 'url',
+				visionSources: visionInputs.visionImages.map(image => image.source),
+				visionWarnings: visionInputs.warnings
 			}
 		});
 		job = await saveJobPhase(job, 'waiting_for_provider');
@@ -255,7 +263,12 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			job.snapshot.promptContext,
 			job.snapshot.variables.content || '',
 			promptVariables,
-			model
+			model,
+			{
+				visionImages: visionInputs.visionImages,
+				visionCandidateCount: visionInputs.candidateCount,
+				visionWarnings: visionInputs.warnings
+			}
 		);
 		job = await saveJobPhase(job, 'building_note', {
 			metrics: {
