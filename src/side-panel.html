@@ -62,11 +62,16 @@
 					<textarea id="prompt-context" rows="3"></textarea>
 					<div class="interpreter-controls">
 						<select id="model-select" style="display: none;"></select>
-						<button id="interpret-btn" data-i18n="interpret"></button>
-						<button id="interpret-and-add-btn" style="display: none;">Interpret & Add</button>
-						<button id="clear-interpreter-session-btn" style="display: none;">Clear Session</button>
+						<button id="interpret-btn" class="interpreter-link-button" data-i18n="interpret"></button>
+						<span class="interpreter-action-separator" aria-hidden="true" style="display: none;">|</span>
+						<button id="interpret-and-add-btn" class="interpreter-link-button" style="display: none;">Interpret & Add</button>
 						<span id="interpreter-timer" style="display: none;"></span>
 					</div>
+					<div id="interpreter-job-status" class="interpreter-job-status" style="display: none;"></div>
+					<label id="close-tab-after-add-container" class="interpreter-option" style="display: none;">
+						<input type="checkbox" id="close-tab-after-add-checkbox">
+						<span>Close tab after add</span>
+					</label>
 					<div id="token-counter" class="token-counter"></div>
 					<div id="interpreter-error" style="display: none;"></div>
 				</div>

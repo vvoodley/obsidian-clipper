@@ -10,6 +10,7 @@ const runningJobs = new Map<string, Promise<InterpreterJob>>();
 
 export interface StartInterpreterJobOptions {
 	forceNew?: boolean;
+	closeTabAfterSave?: boolean;
 }
 
 export interface InterpreterJobSnapshotValidationResult {
@@ -131,6 +132,14 @@ async function saveToObsidianFromBackground(job: InterpreterJob, fileContent: st
 	await openObsidianUrlFromBackground(uriWithContent, job.snapshot.tabId);
 }
 
+async function closeSourceTabAfterSave(tabId: number): Promise<void> {
+	try {
+		await browser.tabs.remove(tabId);
+	} catch {
+		// The user may have already closed the tab. The note was saved, so this is not a job failure.
+	}
+}
+
 function containsPromptVariables(text: string): boolean {
 	return /{{(?:prompt:)?"[\s\S]*?"(?:\|[\s\S]*?)?}}/.test(text);
 }
@@ -219,6 +228,9 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			await saveToObsidianFromBackground(job, fileContent);
 			await incrementStat('addToObsidian', job.snapshot.vault, interpreted.path, job.snapshot.url, job.snapshot.title);
 			job = await saveJob({ ...job, status: 'saved', savedAt: nowIso() });
+			if (job.closeTabAfterSave) {
+				await closeSourceTabAfterSave(job.snapshot.tabId);
+			}
 		}
 
 		return job;
@@ -240,11 +252,6 @@ export async function startInterpreterJob(
 	addToObsidianWhenDone: boolean,
 	options: StartInterpreterJobOptions = {}
 ): Promise<InterpreterJob> {
-	const validation = validateInterpreterJobSnapshot(snapshot);
-	if (!validation.valid) {
-		throw new Error(validation.error || 'Could not fully capture the page. Stay on the source tab and retry.');
-	}
-
 	const sessionKey = buildInterpreterSessionKey(snapshot);
 	const existing = await getInterpreterJob(sessionKey);
 	if (existing) {
@@ -260,7 +267,23 @@ export async function startInterpreterJob(
 		}
 	}
 
+	const validation = validateInterpreterJobSnapshot(snapshot);
 	const runId = createRunId();
+	if (!validation.valid) {
+		return saveJob({
+			id: runId,
+			runId,
+			sessionKey,
+			key: sessionKey,
+			status: 'error',
+			snapshot: { ...snapshot, createdAt: snapshot.createdAt || nowIso() },
+			addToObsidianWhenDone,
+			closeTabAfterSave: options.closeTabAfterSave === true,
+			error: validation.error || 'Could not fully capture the page. Stay on the source tab and retry.',
+			completedAt: nowIso()
+		});
+	}
+
 	const job: InterpreterJob = {
 		id: runId,
 		runId,
@@ -268,7 +291,8 @@ export async function startInterpreterJob(
 		key: sessionKey,
 		status: 'queued',
 		snapshot: { ...snapshot, createdAt: snapshot.createdAt || nowIso() },
-		addToObsidianWhenDone
+		addToObsidianWhenDone,
+		closeTabAfterSave: options.closeTabAfterSave === true
 	};
 
 	await saveJob(job);

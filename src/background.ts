@@ -365,11 +365,12 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 			const snapshot = (typedRequest as any).snapshot;
 			const addToObsidianWhenDone = (typedRequest as any).addToObsidianWhenDone === true;
 			const forceNew = (typedRequest as any).forceNew === true;
+			const closeTabAfterSave = (typedRequest as any).closeTabAfterSave === true;
 			if (!snapshot) {
 				sendResponse({ success: false, error: 'Missing interpreter job snapshot' });
 				return true;
 			}
-			startInterpreterJob(snapshot, addToObsidianWhenDone, { forceNew })
+			startInterpreterJob(snapshot, addToObsidianWhenDone, { forceNew, closeTabAfterSave })
 				.then(job => sendResponse({ success: true, job }))
 				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
 			return true;

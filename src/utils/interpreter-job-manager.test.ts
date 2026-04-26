@@ -158,4 +158,21 @@ describe('startInterpreterJob', () => {
 		const result = await startInterpreterJob(snapshot, true, { forceNew: true });
 		expect(result.runId).toBe('running-run');
 	});
+
+	it('stores the close-tab-after-save option on new jobs', async () => {
+		const snapshot = createSnapshot({ templateId: 'template-close-tab' });
+
+		const result = await startInterpreterJob(snapshot, true, { forceNew: true, closeTabAfterSave: true });
+
+		expect(result.closeTabAfterSave).toBe(true);
+	});
+
+	it('persists capture validation failures as error jobs', async () => {
+		const snapshot = createSnapshot({ noteContent: 'Unresolved {{title}}' });
+		const result = await startInterpreterJob(snapshot, true, { closeTabAfterSave: true });
+
+		expect(result.status).toBe('error');
+		expect(result.error).toContain('Could not fully capture the page');
+		expect(result.closeTabAfterSave).toBe(true);
+	});
 });
