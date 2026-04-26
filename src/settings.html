@@ -824,6 +824,19 @@
 								<input type="text" id="provider-model-id" name="providerModelId" data-i18n="providerModelId" placeholder="Model ID" required>
 							</div>
 						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
+								<label for="extra-request-body">Extra API parameters JSON</label>
+								<div class="setting-item-description">Optional advanced JSON object merged into the request body for this model. Use for provider-specific options like reasoning_effort, thinking, temperature, max_tokens, or response_format. Do not include secrets. The keys "model" and "messages" cannot be overridden.</div>
+							</div>
+							<div class="setting-item-control">
+								<textarea id="extra-request-body" name="extraRequestBody" rows="6" spellcheck="false" placeholder='{
+  "thinking": {
+    "type": "disabled"
+  }
+}'></textarea>
+							</div>
+						</div>
 						
 					</form>
 				</div>

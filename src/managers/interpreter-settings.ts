@@ -5,6 +5,7 @@ import { initializeIcons } from '../icons/icons';
 import { showModal, hideModal } from '../utils/modal-utils';
 import { getMessage, translatePage } from '../utils/i18n';
 import { debugLog } from '../utils/debug';
+import { validateExtraRequestBodyJson } from '../utils/extra-request-body';
 
 export interface PresetProvider {
 	id: string;
@@ -837,8 +838,9 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		const modelSelectionRadios = form.querySelector('#model-selection-radios') as HTMLElement;
 		const nameInput = form.querySelector('[name="name"]') as HTMLInputElement;
 		const providerModelIdInput = form.querySelector('[name="providerModelId"]') as HTMLInputElement;
+		const extraRequestBodyInput = form.querySelector('[name="extraRequestBody"]') as HTMLTextAreaElement;
 
-		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect) {
+		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect || !extraRequestBodyInput) {
 			console.error('Required model modal form elements not found');
 			return;
 		}
@@ -864,6 +866,7 @@ async function showModelModal(model: ModelConfig, index?: number) {
 
 		nameInput.value = '';
 		providerModelIdInput.value = '';
+		extraRequestBodyInput.value = model.extraRequestBody ? JSON.stringify(model.extraRequestBody, null, 2) : '';
 		nameInput.disabled = true;
 		providerModelIdInput.disabled = true;
 		modelSelectionContainer.style.display = 'none';
@@ -1038,6 +1041,16 @@ async function showModelModal(model: ModelConfig, index?: number) {
 
 			updatedModel.name = formData.get('name') as string;
 			updatedModel.providerModelId = formData.get('providerModelId') as string;
+
+			const extraRequestBodyJson = formData.get('extraRequestBody') as string;
+			const extraRequestBodyResult = validateExtraRequestBodyJson(extraRequestBodyJson);
+			if (extraRequestBodyResult.error) {
+				alert(extraRequestBodyResult.error);
+				return;
+			}
+			if (extraRequestBodyResult.value) {
+				updatedModel.extraRequestBody = extraRequestBodyResult.value;
+			}
 
 			if (!updatedModel.name || !updatedModel.providerId || !updatedModel.providerModelId) {
 				alert(getMessage('modelRequiredFields'));
