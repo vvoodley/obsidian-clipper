@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { Template, Property, PromptVariable } from '../types/types';
+import { Template, Property, PromptVariable, InterpreterJob, InterpreterJobSnapshot } from '../types/types';
 import { incrementStat, addHistoryEntry, getClipHistory } from '../utils/storage-utils';
 import { generateFrontmatter, saveToObsidian } from '../utils/obsidian-note-creator';
 import { extractPageContent, initializePageContent } from '../utils/content-extractor';
@@ -23,6 +23,7 @@ import { sanitizeFileName } from '../utils/string-utils';
 import { saveFile } from '../utils/file-utils';
 import { translatePage, getMessage, setupLanguageAndDirection } from '../utils/i18n';
 import { formatPropertyValue } from '../utils/shared';
+import { buildInterpreterJobKey } from '../utils/interpreter-job-manager';
 
 interface ReaderModeResponse {
 	success: boolean;
@@ -35,6 +36,7 @@ let templates: Template[] = [];
 let currentVariables: { [key: string]: string } = {};
 let currentTabId: number | undefined;
 let lastSelectedVault: string | null = null;
+let interpreterJobPollTimer: ReturnType<typeof setInterval> | undefined;
 
 const isSidePanel = window.location.pathname.includes('side-panel.html');
 const urlParams = new URLSearchParams(window.location.search);
@@ -278,6 +280,8 @@ function setupMessageListeners() {
 			// This message is now handled by checkHighlighterModeState
 		} else if (request.action === "highlighterModeChanged") {
 			// This message is now handled by checkHighlighterModeState
+		} else if (request.action === "interpreterJobUpdated") {
+			handleInterpreterJobUpdate(request.job);
 		}
 	});
 }
@@ -572,6 +576,16 @@ function setupEventListeners(tabId: number) {
 		readerModeButton.addEventListener('click', () => toggleReaderMode(tabId));
 		checkReaderModeState(tabId);
 	}
+
+	const interpretAndAddButton = document.getElementById('interpret-and-add-btn') as HTMLButtonElement | null;
+	if (interpretAndAddButton) {
+		interpretAndAddButton.addEventListener('click', () => {
+			startInterpretAndAddJob().catch((error) => {
+				console.error('Error starting interpret-and-add job:', error);
+				showInterpreterStatus(error instanceof Error ? error.message : String(error), true);
+			});
+		});
+	}
 }
 
 async function initializeUI() {
@@ -627,6 +641,17 @@ function clearError(): void {
 
 		document.body.classList.remove('has-error');
 	}
+}
+
+function showInterpreterStatus(message: string, isError = false): void {
+	const interpreterContainer = document.getElementById('interpreter');
+	const interpreterErrorMessage = document.getElementById('interpreter-error') as HTMLDivElement | null;
+	if (!interpreterErrorMessage) return;
+
+	interpreterContainer?.classList.toggle('error', isError);
+	interpreterContainer?.classList.toggle('done', !isError && message.length > 0);
+	interpreterErrorMessage.textContent = message;
+	interpreterErrorMessage.style.display = message ? 'block' : 'none';
 }
 
 function logError(message: string, error?: any): void {
@@ -859,9 +884,11 @@ function buildTemplateFieldsSkeleton(template: Template | null) {
 	// Show/hide interpreter section based on template prompt variables
 	const interpreterContainer = document.getElementById('interpreter');
 	const interpretBtn = document.getElementById('interpret-btn');
+	const interpretAndAddBtn = document.getElementById('interpret-and-add-btn');
 	const hasPromptVars = generalSettings.interpreterEnabled && collectPromptVariables(template).length > 0;
 	if (interpreterContainer) interpreterContainer.style.display = hasPromptVars ? 'flex' : 'none';
 	if (interpretBtn) interpretBtn.style.display = hasPromptVars ? 'inline-block' : 'none';
+	if (interpretAndAddBtn) interpretAndAddBtn.style.display = hasPromptVars ? 'inline-block' : 'none';
 
 	// Populate model dropdown immediately (only needs generalSettings)
 	if (hasPromptVars) {
@@ -877,6 +904,9 @@ function buildTemplateFieldsSkeleton(template: Template | null) {
 			});
 			modelSelect.value = generalSettings.interpreterModel || (enabledModels[0]?.id ?? '');
 			modelSelect.style.display = 'inline-block';
+			modelSelect.addEventListener('change', () => {
+				checkCurrentInterpreterJob().catch(error => console.warn('Unable to check interpreter job:', error));
+			});
 		}
 	}
 }
@@ -967,8 +997,221 @@ async function fillTemplateFieldValues(currentTabId: number, template: Template 
 		}
 	}
 
+	await checkCurrentInterpreterJob();
+
 	const replacedTemplate = await getReplacedTemplate(template, variables, currentTabId!, currentUrl);
 	debugLog('Variables', 'Current template with replaced variables:', JSON.stringify(replacedTemplate, null, 2));
+}
+
+function getCurrentModelId(): string {
+	const modelSelect = document.getElementById('model-select') as HTMLSelectElement | null;
+	return modelSelect?.value || generalSettings.interpreterModel || '';
+}
+
+async function createInterpreterJobSnapshot(): Promise<InterpreterJobSnapshot | null> {
+	if (!currentTemplate || currentTabId === undefined) return null;
+
+	const tabInfo = await getCurrentTabInfo();
+	const noteNameField = document.getElementById('note-name-field') as HTMLTextAreaElement | null;
+	const pathField = document.getElementById('path-name-field') as HTMLInputElement | null;
+	const noteContentField = document.getElementById('note-content-field') as HTMLTextAreaElement | null;
+	const vaultDropdown = document.getElementById('vault-select') as HTMLSelectElement | null;
+	const promptContextTextarea = document.getElementById('prompt-context') as HTMLTextAreaElement | null;
+	const modelId = getCurrentModelId();
+
+	if (!noteNameField || !pathField || !noteContentField || !vaultDropdown || !promptContextTextarea || !modelId) {
+		return null;
+	}
+
+	return {
+		tabId: currentTabId,
+		url: tabInfo.url,
+		title: tabInfo.title,
+		templateId: currentTemplate.id,
+		templateName: currentTemplate.name,
+		modelId,
+		vault: vaultDropdown.value || currentTemplate.vault || '',
+		path: pathField.value || '',
+		noteName: noteNameField.value || '',
+		noteContent: noteContentField.value || '',
+		properties: getPropertiesFromDOM(),
+		behavior: currentTemplate.behavior,
+		promptContext: promptContextTextarea.value || '',
+		variables: currentVariables,
+		createdAt: new Date().toISOString()
+	};
+}
+
+function setInterpreterJobRunningState(isRunning: boolean): void {
+	const interpretAndAddButton = document.getElementById('interpret-and-add-btn') as HTMLButtonElement | null;
+	if (interpretAndAddButton) {
+		interpretAndAddButton.disabled = isRunning;
+	}
+}
+
+function restoreInterpretedJob(job: InterpreterJob): void {
+	if (!job.interpreted) return;
+
+	const noteNameField = document.getElementById('note-name-field') as HTMLTextAreaElement | null;
+	const pathField = document.getElementById('path-name-field') as HTMLInputElement | null;
+	const noteContentField = document.getElementById('note-content-field') as HTMLTextAreaElement | null;
+
+	if (noteNameField) {
+		noteNameField.value = job.interpreted.noteName;
+		adjustNoteNameHeight(noteNameField);
+	}
+	if (pathField) {
+		pathField.value = job.interpreted.path;
+	}
+	if (noteContentField) {
+		noteContentField.value = job.interpreted.noteContent;
+	}
+
+	for (const property of job.interpreted.properties) {
+		const input = document.getElementById(property.name) as HTMLInputElement | null;
+		if (!input) continue;
+		if (input.type === 'checkbox') {
+			input.checked = property.value === 'true';
+		} else {
+			input.value = property.value;
+		}
+	}
+}
+
+function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
+	if (!job) {
+		setInterpreterJobRunningState(false);
+		return;
+	}
+
+	if (job.status === 'queued' || job.status === 'running') {
+		setInterpreterJobRunningState(true);
+		showInterpreterStatus('Interpreter running. You can close this popup and reopen it later.');
+		startInterpreterJobPolling(job.key);
+		return;
+	}
+
+	stopInterpreterJobPolling();
+	setInterpreterJobRunningState(false);
+
+	if (job.status === 'completed') {
+		restoreInterpretedJob(job);
+		showInterpreterStatus('Interpretation complete. Review and add to Obsidian when ready.');
+		return;
+	}
+
+	if (job.status === 'saved') {
+		restoreInterpretedJob(job);
+		showInterpreterStatus('Added to Obsidian.');
+		return;
+	}
+
+	if (job.status === 'error') {
+		showInterpreterStatus(job.error || 'Interpreter job failed. You can retry.', true);
+	}
+}
+
+async function getCurrentInterpreterJobKey(): Promise<string | undefined> {
+	const snapshot = await createInterpreterJobSnapshot();
+	return snapshot ? buildInterpreterJobKey(snapshot) : undefined;
+}
+
+async function checkCurrentInterpreterJob(): Promise<void> {
+	const key = await getCurrentInterpreterJobKey();
+	if (!key) return;
+
+	const job = await getCurrentInterpreterJob(key);
+	updateInterpreterJobUI(job);
+}
+
+async function getCurrentInterpreterJob(key?: string): Promise<InterpreterJob | undefined> {
+	const jobKey = key || await getCurrentInterpreterJobKey();
+	if (!jobKey) return undefined;
+
+	const response = await browser.runtime.sendMessage({
+		action: 'getInterpreterJob',
+		key: jobKey
+	}) as { success?: boolean; job?: InterpreterJob; error?: string };
+
+	return response?.success ? response.job : undefined;
+}
+
+async function waitForInterpreterJob(key: string): Promise<InterpreterJob> {
+	return new Promise((resolve, reject) => {
+		const poll = async () => {
+			try {
+				const job = await getCurrentInterpreterJob(key);
+				if (!job || job.status === 'queued' || job.status === 'running') {
+					setTimeout(poll, 1000);
+					return;
+				}
+				updateInterpreterJobUI(job);
+				resolve(job);
+			} catch (error) {
+				reject(error);
+			}
+		};
+		poll();
+	});
+}
+
+function startInterpreterJobPolling(key: string): void {
+	stopInterpreterJobPolling();
+	interpreterJobPollTimer = setInterval(async () => {
+		try {
+			const response = await browser.runtime.sendMessage({
+				action: 'getInterpreterJob',
+				key
+			}) as { success?: boolean; job?: InterpreterJob };
+			if (response?.success) {
+				updateInterpreterJobUI(response.job);
+			}
+		} catch (error) {
+			console.warn('Failed to poll interpreter job:', error);
+		}
+	}, 1000);
+}
+
+function stopInterpreterJobPolling(): void {
+	if (interpreterJobPollTimer) {
+		clearInterval(interpreterJobPollTimer);
+		interpreterJobPollTimer = undefined;
+	}
+}
+
+async function handleInterpreterJobUpdate(job: InterpreterJob | undefined): Promise<void> {
+	if (!job) return;
+	const key = await getCurrentInterpreterJobKey();
+	if (key === job.key) {
+		updateInterpreterJobUI(job);
+	}
+}
+
+async function startInterpretAndAddJob(): Promise<void> {
+	const snapshot = await createInterpreterJobSnapshot();
+	if (!snapshot) {
+		throw new Error('Unable to create interpreter job snapshot.');
+	}
+
+	const promptVariables = collectPromptVariables(currentTemplate);
+	if (promptVariables.length === 0) {
+		throw new Error('No prompt variables found.');
+	}
+
+	setInterpreterJobRunningState(true);
+	showInterpreterStatus('Interpreting and will add to Obsidian when complete...');
+
+	const response = await browser.runtime.sendMessage({
+		action: 'startInterpreterClipJob',
+		snapshot,
+		addToObsidianWhenDone: true
+	}) as { success?: boolean; job?: InterpreterJob; error?: string };
+
+	if (!response?.success || !response.job) {
+		throw new Error(response?.error || 'Failed to start interpreter job.');
+	}
+
+	updateInterpreterJobUI(response.job);
 }
 
 function setupMetadataToggle() {
@@ -1326,7 +1569,29 @@ async function handleClipObsidian(): Promise<void> {
 	try {
 		// Handle interpreter if needed
 		if (generalSettings.interpreterEnabled && interpretBtn && collectPromptVariables(currentTemplate).length > 0) {
-			if (interpretBtn.classList.contains('processing')) {
+			const existingJobKey = await getCurrentInterpreterJobKey();
+			const existingJob = existingJobKey ? await getCurrentInterpreterJob(existingJobKey) : undefined;
+
+			if (existingJob?.status === 'queued' || existingJob?.status === 'running') {
+				showInterpreterStatus('Interpreter running. Waiting for the current session to finish.');
+				const finishedJob = await waitForInterpreterJob(existingJob.key);
+				if (finishedJob.status === 'saved') {
+					return;
+				}
+				if (finishedJob.status === 'completed') {
+					restoreInterpretedJob(finishedJob);
+					interpretBtn.classList.add('done');
+					interpretBtn.disabled = true;
+				} else if (finishedJob.status === 'error') {
+					throw new Error(finishedJob.error || getMessage('failedToProcessInterpreter'));
+				}
+			} else if (existingJob?.status === 'completed') {
+				restoreInterpretedJob(existingJob);
+				interpretBtn.classList.add('done');
+				interpretBtn.disabled = true;
+			} else if (existingJob?.status === 'saved') {
+				return;
+			} else if (interpretBtn.classList.contains('processing')) {
 				await waitForInterpreter(interpretBtn);
 			} else if (!interpretBtn.classList.contains('done')) {
 				interpretBtn.click();

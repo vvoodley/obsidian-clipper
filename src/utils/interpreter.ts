@@ -358,40 +358,49 @@ function parseLLMResponse(responseContent: string, promptVariables: PromptVariab
 	}
 }
 
-export function collectPromptVariables(template: Template | null): PromptVariable[] {
-	const promptMap = new Map<string, PromptVariable>();
-	const promptRegex = /{{(?:prompt:)?"([\s\S]*?)"(\|.*?)?}}/g;
-	let match;
+const promptVariableRegex = /{{(?:prompt:)?"([\s\S]*?)"(\|.*?)?}}/g;
 
-	function addPrompt(prompt: string, filters: string) {
+function collectPromptVariablesFromText(text: string | undefined, promptMap: Map<string, PromptVariable>) {
+	if (!text) return;
+	let match;
+	promptVariableRegex.lastIndex = 0;
+	while ((match = promptVariableRegex.exec(text)) !== null) {
+		const prompt = match[1];
+		const filters = match[2] || '';
 		if (!promptMap.has(prompt)) {
 			const key = `prompt_${promptMap.size + 1}`;
 			promptMap.set(prompt, { key, prompt, filters });
 		}
 	}
+}
 
-	if (template?.noteContentFormat) {
-		while ((match = promptRegex.exec(template.noteContentFormat)) !== null) {
-			addPrompt(match[1], match[2] || '');
+export function collectPromptVariablesFromTemplate(template: Template | null): PromptVariable[] {
+	const promptMap = new Map<string, PromptVariable>();
+
+	collectPromptVariablesFromText(template?.noteContentFormat, promptMap);
+
+	if (Array.isArray(template?.properties)) {
+		for (const property of template.properties) {
+			collectPromptVariablesFromText(property.value, promptMap);
 		}
 	}
 
-	if (template?.properties) {
-		for (const property of template.properties) {
-			let propertyValue = property.value;
-			while ((match = promptRegex.exec(propertyValue)) !== null) {
-				addPrompt(match[1], match[2] || '');
-			}
-		}
+	collectPromptVariablesFromText(template?.noteNameFormat, promptMap);
+	collectPromptVariablesFromText(template?.path, promptMap);
+
+	return Array.from(promptMap.values());
+}
+
+export function collectPromptVariables(template: Template | null): PromptVariable[] {
+	const promptMap = new Map<string, PromptVariable>();
+	for (const variable of collectPromptVariablesFromTemplate(template)) {
+		promptMap.set(variable.prompt, variable);
 	}
 
 	const allInputs = document.querySelectorAll('input, textarea');
 	allInputs.forEach((input) => {
 		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
-			let inputValue = input.value;
-			while ((match = promptRegex.exec(inputValue)) !== null) {
-				addPrompt(match[1], match[2] || '');
-			}
+			collectPromptVariablesFromText(input.value, promptMap);
 		}
 	});
 
@@ -636,36 +645,55 @@ export async function handleInterpreterUI(
 }
 
 // Similar to replaceVariables, but happens after the LLM response is received
+export function replacePromptVariablesInText(text: string, promptVariables: PromptVariable[], promptResponses: any[]): string {
+	return text.replace(/{{(?:prompt:)?"([\s\S]*?)"(\|[\s\S]*?)?}}/g, (match, promptText, filters) => {
+		const variable = promptVariables.find(v => v.prompt === promptText);
+		if (!variable) return match;
+
+		const response = promptResponses.find(r => r.key === variable.key);
+		if (response && response.user_response !== undefined) {
+			let value = response.user_response;
+
+			if (typeof value === 'object') {
+				try {
+					value = JSON.stringify(value, null, 2);
+				} catch (error) {
+					console.error('Error stringifying object:', error);
+					value = String(value);
+				}
+			}
+
+			if (filters) {
+				value = applyFilters(value, filters.slice(1));
+			}
+
+			return value;
+		}
+		return match;
+	});
+}
+
+export function applyPromptResponsesToSnapshot(
+	snapshot: { noteName: string; path: string; noteContent: string; properties: { id?: string; name: string; value: string; type?: string }[] },
+	promptVariables: PromptVariable[],
+	promptResponses: any[]
+) {
+	return {
+		noteName: replacePromptVariablesInText(snapshot.noteName, promptVariables, promptResponses),
+		path: replacePromptVariablesInText(snapshot.path, promptVariables, promptResponses),
+		noteContent: replacePromptVariablesInText(snapshot.noteContent, promptVariables, promptResponses),
+		properties: snapshot.properties.map(property => ({
+			...property,
+			value: replacePromptVariablesInText(property.value, promptVariables, promptResponses)
+		}))
+	};
+}
+
 export function replacePromptVariables(promptVariables: PromptVariable[], promptResponses: any[]) {
 	const allInputs = document.querySelectorAll('input, textarea');
 	allInputs.forEach((input) => {
 		if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
-			input.value = input.value.replace(/{{(?:prompt:)?"([\s\S]*?)"(\|[\s\S]*?)?}}/g, (match, promptText, filters) => {
-				const variable = promptVariables.find(v => v.prompt === promptText);
-				if (!variable) return match;
-
-				const response = promptResponses.find(r => r.key === variable.key);
-				if (response && response.user_response !== undefined) {
-					let value = response.user_response;
-					
-					// Handle array or object responses
-					if (typeof value === 'object') {
-						try {
-							value = JSON.stringify(value, null, 2);
-						} catch (error) {
-							console.error('Error stringifying object:', error);
-							value = String(value);
-						}
-					}
-
-					if (filters) {
-						value = applyFilters(value, filters.slice(1));
-					}
-					
-					return value;
-				}
-				return match; // Return original if no match found
-			});
+			input.value = replacePromptVariablesInText(input.value, promptVariables, promptResponses);
 
 			// Adjust height for noteNameField after updating its value
 			if (input.id === 'note-name-field' && input instanceof HTMLTextAreaElement) {

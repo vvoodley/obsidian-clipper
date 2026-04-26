@@ -108,6 +108,46 @@ export interface ModelConfig {
 	extraRequestBody?: Record<string, unknown>;
 }
 
+export type InterpreterJobStatus = 'queued' | 'running' | 'completed' | 'saved' | 'error';
+
+export interface InterpreterJobSnapshot {
+	tabId: number;
+	url: string;
+	title?: string;
+	templateId: string;
+	templateName: string;
+	modelId: string;
+	vault: string;
+	path: string;
+	noteName: string;
+	noteContent: string;
+	properties: Property[];
+	behavior: Template['behavior'];
+	promptContext: string;
+	variables: Record<string, string>;
+	createdAt: string;
+}
+
+export interface InterpreterJob {
+	id: string;
+	key: string;
+	status: InterpreterJobStatus;
+	snapshot: InterpreterJobSnapshot;
+	addToObsidianWhenDone: boolean;
+	startedAt?: string;
+	completedAt?: string;
+	savedAt?: string;
+	error?: string;
+	promptResponses?: any[];
+	interpreted?: {
+		noteName: string;
+		path: string;
+		noteContent: string;
+		properties: Property[];
+		fileContent?: string;
+	};
+}
+
 export interface HistoryEntry {
 	datetime: string;
 	url: string;

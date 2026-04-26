@@ -5,6 +5,7 @@ import { TextHighlightData } from './utils/highlighter';
 import { debounce } from './utils/debounce';
 import { Settings } from './types/types';
 import { debugLog } from './utils/debug';
+import { startInterpreterJob, getInterpreterJob, clearInterpreterJob } from './utils/interpreter-job-manager';
 
 const YOUTUBE_EMBED_RULE_ID = 9001;
 const YOUTUBE_INNERTUBE_RULE_ID = 9002;
@@ -357,6 +358,43 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 					sendResponse({success: false, error: 'No active tab found'});
 				}
 			});
+			return true;
+		}
+
+		if (typedRequest.action === 'startInterpreterClipJob') {
+			const snapshot = (typedRequest as any).snapshot;
+			const addToObsidianWhenDone = (typedRequest as any).addToObsidianWhenDone === true;
+			if (!snapshot) {
+				sendResponse({ success: false, error: 'Missing interpreter job snapshot' });
+				return true;
+			}
+			startInterpreterJob(snapshot, addToObsidianWhenDone)
+				.then(job => sendResponse({ success: true, job }))
+				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
+			return true;
+		}
+
+		if (typedRequest.action === 'getInterpreterJob') {
+			const key = (typedRequest as any).key;
+			if (!key) {
+				sendResponse({ success: false, error: 'Missing interpreter job key' });
+				return true;
+			}
+			getInterpreterJob(key)
+				.then(job => sendResponse({ success: true, job }))
+				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
+			return true;
+		}
+
+		if (typedRequest.action === 'clearInterpreterJob') {
+			const key = (typedRequest as any).key;
+			if (!key) {
+				sendResponse({ success: false, error: 'Missing interpreter job key' });
+				return true;
+			}
+			clearInterpreterJob(key)
+				.then(() => sendResponse({ success: true }))
+				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
 			return true;
 		}
 
