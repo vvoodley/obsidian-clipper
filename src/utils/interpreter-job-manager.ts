@@ -241,6 +241,10 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 		};
 		const promptVariables = collectPromptVariablesFromTemplate(template);
 		const visionInputs = prepareVisionInputsFromPromptContext(job.snapshot.promptContext, model);
+		const visionImageCountBySource = visionInputs.visionImages.reduce((acc, image) => {
+			acc[image.source] = (acc[image.source] || 0) + 1;
+			return acc;
+		}, {} as Record<string, number>);
 		job = await saveJobPhase(job, 'sending_to_provider', {
 			metrics: {
 				...job.metrics,
@@ -255,6 +259,7 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 				visionAttachedCount: visionInputs.visionImages.length,
 				visionImageMode: model.visionImageMode || 'url',
 				visionSources: visionInputs.visionImages.map(image => image.source),
+				visionImageCountBySource,
 				visionWarnings: visionInputs.warnings
 			}
 		});

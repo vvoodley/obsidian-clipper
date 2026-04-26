@@ -181,6 +181,7 @@ export interface InterpreterJob {
 		visionAttachedCount?: number;
 		visionImageMode?: VisionImageMode;
 		visionSources?: string[];
+		visionImageCountBySource?: Record<string, number>;
 		visionWarnings?: string[];
 	};
 	promptResponses?: any[];

@@ -8,7 +8,8 @@ export function buildRemoteVisionImageAttachments(
 	return candidates.map(candidate => ({
 		sourceUrl: candidate.url,
 		remoteUrl: candidate.url,
-		source: candidate.source
+		source: candidate.source,
+		index: candidate.index
 	}));
 }
 
@@ -45,7 +46,7 @@ export function prepareVisionInputsFromPromptContext(
 		};
 	}
 
-	const selected = selectVisionImageCandidates(candidates, model.maxVisionImages ?? 2);
+	const selected = selectVisionImageCandidates(candidates, model.maxVisionImages ?? 8);
 	return {
 		visionImages: buildRemoteVisionImageAttachments(selected),
 		candidateCount: candidates.length,

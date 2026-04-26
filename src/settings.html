@@ -827,7 +827,7 @@
 						<div class="setting-item">
 							<div class="setting-item-info">
 								<label for="vision-enabled">Enable vision image inputs</label>
-								<div class="setting-item-description">Vision image inputs attach the first main post image and first quoted/embedded post image when a template captures them. If no image is found, the Interpreter runs text-only.</div>
+								<div class="setting-item-description">Vision image inputs attach captured main post and quoted/embedded post images. If no image is found, the Interpreter runs text-only.</div>
 							</div>
 							<div class="setting-item-control">
 								<input type="checkbox" id="vision-enabled" name="visionEnabled">
@@ -849,10 +849,10 @@
 						<div class="setting-item">
 							<div class="setting-item-info">
 								<label for="max-vision-images">Max images per request</label>
-								<div class="setting-item-description">Limited to 2 for this workflow: first main post image and first quoted/embedded post image.</div>
+								<div class="setting-item-description">Limited to 8 for this workflow: up to 4 main post images and up to 4 quoted/embedded post images.</div>
 							</div>
 							<div class="setting-item-control">
-								<input type="number" id="max-vision-images" name="maxVisionImages" min="0" max="2" value="2">
+								<input type="number" id="max-vision-images" name="maxVisionImages" min="0" max="8" value="8">
 							</div>
 						</div>
 						<div class="setting-item">

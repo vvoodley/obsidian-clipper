@@ -4,6 +4,7 @@ export interface VisionImageCandidate {
 	url: string;
 	source: VisionImageSource;
 	priority: number;
+	index?: number;
 }
 
 export interface VisionImageAttachment {
@@ -11,4 +12,5 @@ export interface VisionImageAttachment {
 	remoteUrl?: string;
 	dataUrl?: string;
 	source: VisionImageSource;
+	index?: number;
 }

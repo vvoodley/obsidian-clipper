@@ -3,9 +3,19 @@ import type { VisionImageCandidate, VisionImageSource } from './image-types';
 const START_MARKER = 'VISION_IMAGE_URLS_START';
 const END_MARKER = 'VISION_IMAGE_URLS_END';
 
-const FIELD_DEFINITIONS: Array<{ marker: string; source: VisionImageSource; priority: number }> = [
-	{ marker: 'MAIN_POST_FIRST_IMAGE', source: 'main_post', priority: 1 },
-	{ marker: 'QUOTED_OR_EMBEDDED_POST_FIRST_IMAGE', source: 'quoted_or_embedded_post', priority: 2 }
+const MAX_TOTAL_IMAGES = 8;
+
+const FIELD_DEFINITIONS: Array<{ marker: string; source: VisionImageSource; priority: number; index: number }> = [
+	{ marker: 'MAIN_POST_FIRST_IMAGE', source: 'main_post', priority: 1, index: 1 },
+	{ marker: 'MAIN_POST_IMAGE_1', source: 'main_post', priority: 1, index: 1 },
+	{ marker: 'MAIN_POST_IMAGE_2', source: 'main_post', priority: 2, index: 2 },
+	{ marker: 'MAIN_POST_IMAGE_3', source: 'main_post', priority: 3, index: 3 },
+	{ marker: 'MAIN_POST_IMAGE_4', source: 'main_post', priority: 4, index: 4 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_FIRST_IMAGE', source: 'quoted_or_embedded_post', priority: 5, index: 1 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_1', source: 'quoted_or_embedded_post', priority: 5, index: 1 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_2', source: 'quoted_or_embedded_post', priority: 6, index: 2 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_3', source: 'quoted_or_embedded_post', priority: 7, index: 3 },
+	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_4', source: 'quoted_or_embedded_post', priority: 8, index: 4 }
 ];
 
 function getMarkedBlock(promptContext: string): string | undefined {
@@ -68,18 +78,19 @@ export function extractVisionImageCandidates(promptContext: string): VisionImage
 		candidates.push({
 			url: value,
 			source: field.source,
-			priority: field.priority
+			priority: field.priority,
+			index: field.index
 		});
 	}
 
-	return candidates.slice(0, 2);
+	return candidates.slice(0, MAX_TOTAL_IMAGES);
 }
 
 export function selectVisionImageCandidates(
 	candidates: VisionImageCandidate[],
-	maxImages = 2
+	maxImages = MAX_TOTAL_IMAGES
 ): VisionImageCandidate[] {
-	const limit = Math.max(0, Math.min(2, maxImages));
+	const limit = Math.max(0, Math.min(MAX_TOTAL_IMAGES, maxImages));
 	return [...candidates]
 		.sort((a, b) => a.priority - b.priority)
 		.slice(0, limit);

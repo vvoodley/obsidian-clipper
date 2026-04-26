@@ -806,7 +806,7 @@ function addModelToList(event: Event) {
 		enabled: true,
 		visionEnabled: false,
 		visionImageMode: 'url',
-		maxVisionImages: 2,
+		maxVisionImages: 8,
 		maxVisionImageBytes: 5_000_000
 	};
 	showModelModal(newModel);
@@ -876,7 +876,7 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		extraRequestBodyInput.value = model.extraRequestBody ? JSON.stringify(model.extraRequestBody, null, 2) : '';
 		visionEnabledInput.checked = model.visionEnabled === true;
 		visionImageModeSelect.value = model.visionImageMode || 'url';
-		maxVisionImagesInput.value = String(Math.max(0, Math.min(2, model.maxVisionImages ?? 2)));
+		maxVisionImagesInput.value = String(Math.max(0, Math.min(8, model.maxVisionImages ?? 8)));
 		nameInput.disabled = true;
 		providerModelIdInput.disabled = true;
 		modelSelectionContainer.style.display = 'none';
@@ -1049,7 +1049,7 @@ async function showModelModal(model: ModelConfig, index?: number) {
 				enabled: model.enabled,
 				visionEnabled: formData.get('visionEnabled') === 'on',
 				visionImageMode: (formData.get('visionImageMode') as VisionImageMode) || 'url',
-				maxVisionImages: Math.max(0, Math.min(2, Number(formData.get('maxVisionImages') || 2))),
+				maxVisionImages: Math.max(0, Math.min(8, Number(formData.get('maxVisionImages') || 8))),
 				maxVisionImageBytes: model.maxVisionImageBytes ?? 5_000_000
 			};
 

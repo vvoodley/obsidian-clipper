@@ -7,8 +7,8 @@ describe('vision image attachments', () => {
 			{ url: 'https://pbs.twimg.com/media/AAA.jpg', source: 'main_post', priority: 1 },
 			{ url: 'https://pbs.twimg.com/media/BBB.jpg', source: 'quoted_or_embedded_post', priority: 2 }
 		])).toEqual([
-			{ sourceUrl: 'https://pbs.twimg.com/media/AAA.jpg', remoteUrl: 'https://pbs.twimg.com/media/AAA.jpg', source: 'main_post' },
-			{ sourceUrl: 'https://pbs.twimg.com/media/BBB.jpg', remoteUrl: 'https://pbs.twimg.com/media/BBB.jpg', source: 'quoted_or_embedded_post' }
+			{ sourceUrl: 'https://pbs.twimg.com/media/AAA.jpg', remoteUrl: 'https://pbs.twimg.com/media/AAA.jpg', source: 'main_post', index: undefined },
+			{ sourceUrl: 'https://pbs.twimg.com/media/BBB.jpg', remoteUrl: 'https://pbs.twimg.com/media/BBB.jpg', source: 'quoted_or_embedded_post', index: undefined }
 		]);
 	});
 
