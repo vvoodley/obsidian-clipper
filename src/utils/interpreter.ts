@@ -11,8 +11,10 @@ import { mergeExtraRequestBody } from './extra-request-body';
 
 // Store event listeners for cleanup
 const eventListeners = new WeakMap<HTMLElement, { [key: string]: EventListener }>();
+export const DEFAULT_LLM_TIMEOUT_MS = 300_000;
+export const LLM_TIMEOUT_ERROR_MESSAGE = 'AI provider timed out after 300 seconds.';
 
-export async function sendToLLM(promptContext: string, content: string, promptVariables: PromptVariable[], model: ModelConfig): Promise<{ promptResponses: any[] }> {
+export async function sendToLLM(promptContext: string, content: string, promptVariables: PromptVariable[], model: ModelConfig): Promise<{ promptResponses: any[]; responseChars?: number }> {
 	debugLog('Interpreter', 'Sending request to LLM...');
 	
 	// Find the provider for this model
@@ -149,15 +151,32 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 		requestBody = mergeExtraRequestBody(requestBody, model.extraRequestBody);
 		debugLog('Interpreter', `Sending request to ${provider.name} API:`, requestBody);
 
-		const response = await fetch(requestUrl, {
-			method: 'POST',
-			headers: headers,
-			body: JSON.stringify(requestBody)
-		});
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), DEFAULT_LLM_TIMEOUT_MS);
+		let response: Response;
+		let responseText: string;
+		try {
+			response = await fetch(requestUrl, {
+				method: 'POST',
+				headers: headers,
+				body: JSON.stringify(requestBody),
+				signal: controller.signal
+			});
+			responseText = await response.text();
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				throw new Error(LLM_TIMEOUT_ERROR_MESSAGE);
+			}
+			if (error instanceof Error && error.name === 'AbortError') {
+				throw new Error(LLM_TIMEOUT_ERROR_MESSAGE);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timeoutId);
+		}
 
 		if (!response.ok) {
-			const errorText = await response.text();
-			console.error(`${provider.name} error response:`, errorText);
+			console.error(`${provider.name} error response:`, responseText);
 			
 			// Add specific message for Ollama 403 errors
 			if (provider.name.toLowerCase().includes('ollama') && response.status === 403) {
@@ -167,10 +186,9 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 				);
 			}
 			
-			throw new Error(`${provider.name} error: ${response.statusText} ${errorText}`);
+			throw new Error(`${provider.name} error: ${response.statusText} ${responseText}`);
 		}
 
-		const responseText = await response.text();
 		debugLog('Interpreter', `Raw ${provider.name} response:`, responseText);
 
 		let data;
@@ -216,7 +234,10 @@ export async function sendToLLM(promptContext: string, content: string, promptVa
 		}
 		debugLog('Interpreter', 'Processed LLM response:', llmResponseContent);
 
-		return parseLLMResponse(llmResponseContent, promptVariables);
+		return {
+			...parseLLMResponse(llmResponseContent, promptVariables),
+			responseChars: llmResponseContent.length
+		};
 	} catch (error) {
 		console.error(`Error sending to ${provider.name} LLM:`, error);
 		throw error;
@@ -317,6 +338,9 @@ function parseLLMResponse(responseContent: string, promptVariables: PromptVariab
 		// Validate the response structure
 		if (!parsedResponse?.prompts_responses) {
 			debugLog('Interpreter', 'No prompts_responses found in parsed response', parsedResponse);
+			if (promptVariables.length > 0) {
+				throw new Error('AI provider returned a response, but Web Clipper could not parse the prompt responses.');
+			}
 			return { promptResponses: [] };
 		}
 
@@ -336,6 +360,10 @@ function parseLLMResponse(responseContent: string, promptVariables: PromptVariab
 			user_response: parsedResponse.prompts_responses[variable.key] || ''
 		}));
 
+		if (promptVariables.length > 0 && !promptResponses.some(response => String(response.user_response || '').trim().length > 0)) {
+			throw new Error('AI provider returned a response, but Web Clipper could not parse the prompt responses.');
+		}
+
 		debugLog('Interpreter', 'Successfully mapped prompt responses:', promptResponses);
 		return { promptResponses };
 	} catch (parseError) {
@@ -344,7 +372,12 @@ function parseLLMResponse(responseContent: string, promptVariables: PromptVariab
 			error: parseError,
 			responseContent: responseContent
 		});
-		return { promptResponses: [] };
+		if (promptVariables.length > 0) {
+			throw new Error('AI provider returned a response, but Web Clipper could not parse the prompt responses.');
+		}
+		throw parseError instanceof Error
+			? parseError
+			: new Error('AI provider returned a response, but Web Clipper could not parse the prompt responses.');
 	}
 }
 

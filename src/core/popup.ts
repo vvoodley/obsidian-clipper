@@ -281,7 +281,10 @@ function setupMessageListeners() {
 		} else if (request.action === "highlighterModeChanged") {
 			// This message is now handled by checkHighlighterModeState
 		} else if (request.action === "interpreterJobUpdated") {
-			handleInterpreterJobUpdate(request.job);
+			handleInterpreterJobUpdate(request.job)
+				.then(() => sendResponse({ success: true }))
+				.catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));
+			return true;
 		}
 	});
 }
@@ -1125,7 +1128,7 @@ function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
 
 	if (job.status === 'queued' || job.status === 'running') {
 		setInterpreterJobRunningState(true);
-		showInterpreterJobStatus(getJobDurationMessage(job), job.status === 'queued' ? 'queued' : 'running');
+		showInterpreterJobStatus(getJobStatusMessage(job), job.status === 'queued' ? 'queued' : 'running');
 		startInterpreterJobPolling(job.sessionKey || job.key);
 		return;
 	}
@@ -1135,13 +1138,14 @@ function updateInterpreterJobUI(job: InterpreterJob | undefined): void {
 
 	if (job.status === 'completed') {
 		restoreInterpretedJob(job);
-		showInterpreterJobStatus(getJobDurationMessage(job) || 'Interpretation complete.', 'completed');
+		showInterpreterJobStatus(getJobStatusMessage(job) || 'Interpretation complete.', 'completed');
 		return;
 	}
 
 	if (job.status === 'saved') {
 		restoreInterpretedJob(job);
-		showInterpreterJobStatus(getJobDurationMessage(job) || 'Added to Obsidian.', 'saved');
+		const closeTabSuffix = job.closeTabError ? ` ${job.closeTabError}` : '';
+		showInterpreterJobStatus(`${getJobStatusMessage(job) || 'Added to Obsidian.'}${closeTabSuffix}`, 'saved');
 		return;
 	}
 
@@ -1226,14 +1230,25 @@ async function handleInterpreterJobUpdate(job: InterpreterJob | undefined): Prom
 	}
 }
 
-function getJobDurationMessage(job: InterpreterJob): string {
+function getJobStatusMessage(job: InterpreterJob): string {
 	const startedAt = job.startedAt ? new Date(job.startedAt).getTime() : 0;
 	const completedAt = job.completedAt ? new Date(job.completedAt).getTime() : 0;
 	const savedAt = job.savedAt ? new Date(job.savedAt).getTime() : 0;
 	const now = Date.now();
+	const largeContext = job.metrics?.promptContextChars && job.metrics.promptContextChars > 100000
+		? ` Large context: ${Math.round(job.metrics.promptContextChars / 1000)}k chars.`
+		: '';
 
-	if ((job.status === 'queued' || job.status === 'running') && startedAt) {
-		return `Running for ${formatDuration(now - startedAt)}`;
+	if (job.status === 'queued') return 'Queued...';
+	if (job.status === 'running') {
+		if (job.phase === 'validating') return `Validating captured page...${largeContext}`;
+		if (job.phase === 'sending_to_provider') return `Sending to AI provider...${largeContext}`;
+		if (job.phase === 'waiting_for_provider' && startedAt) return `Waiting for AI provider for ${formatDuration(now - startedAt)}...${largeContext}`;
+		if (job.phase === 'parsing_response') return 'Parsing AI provider response...';
+		if (job.phase === 'building_note') return 'Building note...';
+		if (job.phase === 'saving_to_obsidian') return 'Adding to Obsidian...';
+		if (job.phase === 'closing_tab') return 'Closing tab...';
+		if (startedAt) return `Running for ${formatDuration(now - startedAt)}${largeContext}`;
 	}
 	if (job.status === 'completed' && startedAt && completedAt) {
 		return `Completed in ${formatDuration(completedAt - startedAt)}`;
@@ -1241,7 +1256,6 @@ function getJobDurationMessage(job: InterpreterJob): string {
 	if (job.status === 'saved' && startedAt && (savedAt || completedAt)) {
 		return `Added to Obsidian in ${formatDuration((savedAt || completedAt) - startedAt)}`;
 	}
-	if (job.status === 'queued') return 'Queued...';
 	return '';
 }
 

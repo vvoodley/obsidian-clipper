@@ -3,6 +3,10 @@ import { applyPromptResponsesToSnapshot, replacePromptVariablesInText } from './
 import {
 	buildInterpreterJobKey,
 	buildInterpreterSessionKey,
+	DEFAULT_JOB_TIMEOUT_MS,
+	isJobStale,
+	JOB_TIMEOUT_ERROR_MESSAGE,
+	getInterpreterJob,
 	startInterpreterJob,
 	validateInterpreterJobSnapshot
 } from './interpreter-job-manager';
@@ -151,7 +155,7 @@ describe('startInterpreterJob', () => {
 			status: 'running',
 			snapshot,
 			addToObsidianWhenDone: true,
-			startedAt: '2026-04-26T00:00:00.000Z'
+			startedAt: new Date().toISOString()
 		};
 		localStorageMock.interpreter_jobs = { [sessionKey]: runningJob };
 
@@ -174,5 +178,38 @@ describe('startInterpreterJob', () => {
 		expect(result.status).toBe('error');
 		expect(result.error).toContain('Could not fully capture the page');
 		expect(result.closeTabAfterSave).toBe(true);
+	});
+
+	it('marks stale running jobs as timed out and allows forceNew rerun', async () => {
+		const snapshot = createSnapshot({ templateId: 'template-stale' });
+		const sessionKey = buildInterpreterSessionKey(snapshot);
+		const staleStartedAt = new Date(Date.now() - DEFAULT_JOB_TIMEOUT_MS - 1000).toISOString();
+		const staleJob: InterpreterJob = {
+			id: 'stale-run',
+			runId: 'stale-run',
+			sessionKey,
+			key: sessionKey,
+			status: 'running',
+			phase: 'waiting_for_provider',
+			snapshot,
+			addToObsidianWhenDone: true,
+			startedAt: staleStartedAt
+		};
+		localStorageMock.interpreter_jobs = { [sessionKey]: staleJob };
+
+		expect(isJobStale(staleJob)).toBe(true);
+		const timedOut = await getInterpreterJob(sessionKey);
+		expect(timedOut).toMatchObject({
+			status: 'error',
+			phase: 'error',
+			error: JOB_TIMEOUT_ERROR_MESSAGE
+		});
+
+		const existing = await startInterpreterJob(snapshot, true);
+		expect(existing.runId).toBe('stale-run');
+
+		const fresh = await startInterpreterJob(snapshot, true, { forceNew: true });
+		expect(fresh.runId).not.toBe('stale-run');
+		expect(fresh.phase).toBe('queued');
 	});
 });

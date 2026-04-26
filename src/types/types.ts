@@ -111,6 +111,19 @@ export interface ModelConfig {
 
 export type InterpreterJobStatus = 'queued' | 'running' | 'completed' | 'saved' | 'error';
 
+export type InterpreterJobPhase =
+	| 'queued'
+	| 'capturing'
+	| 'validating'
+	| 'sending_to_provider'
+	| 'waiting_for_provider'
+	| 'parsing_response'
+	| 'building_note'
+	| 'saving_to_obsidian'
+	| 'closing_tab'
+	| 'done'
+	| 'error';
+
 export interface InterpreterJobSnapshot {
 	tabId: number;
 	url: string;
@@ -135,13 +148,29 @@ export interface InterpreterJob {
 	sessionKey: string;
 	key: string;
 	status: InterpreterJobStatus;
+	phase?: InterpreterJobPhase;
 	snapshot: InterpreterJobSnapshot;
 	addToObsidianWhenDone: boolean;
 	closeTabAfterSave?: boolean;
+	closeTabError?: string;
 	startedAt?: string;
+	updatedAt?: string;
+	lastHeartbeatAt?: string;
 	completedAt?: string;
 	savedAt?: string;
 	error?: string;
+	metrics?: {
+		providerName?: string;
+		modelName?: string;
+		promptContextChars?: number;
+		contentChars?: number;
+		promptVariableCount?: number;
+		requestStartedAt?: string;
+		responseReceivedAt?: string;
+		responseChars?: number;
+		saveStartedAt?: string;
+		savedAt?: string;
+	};
 	promptResponses?: any[];
 	interpreted?: {
 		noteName: string;

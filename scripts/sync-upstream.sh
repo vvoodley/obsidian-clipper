@@ -40,11 +40,11 @@ npm test
 npm run build
 git push --force-with-lease origin feature/interpreter-extra-api-params
 
-echo "[sync] Rebasing background jobs branch..."
-git checkout feature/interpreter-background-jobs
+echo "[sync] Rebasing interpreter workflow branch..."
+git checkout dev/interpreter-workflow
 git rebase feature/interpreter-extra-api-params
 npm test
 npm run build
-git push --force-with-lease origin feature/interpreter-background-jobs
+git push --force-with-lease origin dev/interpreter-workflow
 
 echo "[sync] Done."

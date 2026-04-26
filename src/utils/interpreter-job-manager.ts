@@ -4,9 +4,12 @@ import { loadSettings, generalSettings, incrementStat } from './storage-utils';
 import { sendToLLM, collectPromptVariablesFromTemplate, applyPromptResponsesToSnapshot } from './interpreter';
 import { generateFrontmatter, buildObsidianUrl } from './obsidian-note-creator';
 import { Template } from '../types/types';
+import type { InterpreterJobPhase } from '../types/types';
 
 const STORAGE_KEY = 'interpreter_jobs';
 const runningJobs = new Map<string, Promise<InterpreterJob>>();
+export const DEFAULT_JOB_TIMEOUT_MS = 420_000;
+export const JOB_TIMEOUT_ERROR_MESSAGE = 'Interpreter job timed out after 420 seconds.';
 
 export interface StartInterpreterJobOptions {
 	forceNew?: boolean;
@@ -21,6 +24,16 @@ export interface InterpreterJobSnapshotValidationResult {
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function mergeJobUpdate(job: InterpreterJob, updates: Partial<InterpreterJob>): InterpreterJob {
+	const timestamp = nowIso();
+	return {
+		...job,
+		...updates,
+		updatedAt: timestamp,
+		lastHeartbeatAt: ['queued', 'running'].includes(updates.status || job.status) ? timestamp : job.lastHeartbeatAt
+	};
 }
 
 export function buildInterpreterSessionKey(snapshot: Pick<InterpreterJobSnapshot, 'tabId' | 'url' | 'templateId' | 'modelId'>): string {
@@ -54,7 +67,7 @@ async function getJobs(): Promise<Record<string, InterpreterJob>> {
 
 async function saveJob(job: InterpreterJob): Promise<InterpreterJob> {
 	const jobs = await getJobs();
-	job = normalizeJob(job);
+	job = normalizeJob({ ...job, updatedAt: job.updatedAt || nowIso() });
 	jobs[job.sessionKey] = job;
 	await browser.storage.local.set({ [STORAGE_KEY]: jobs });
 	try {
@@ -65,10 +78,30 @@ async function saveJob(job: InterpreterJob): Promise<InterpreterJob> {
 	return job;
 }
 
+async function saveJobPhase(job: InterpreterJob, phase: InterpreterJobPhase, updates: Partial<InterpreterJob> = {}): Promise<InterpreterJob> {
+	return saveJob(mergeJobUpdate(job, { ...updates, phase }));
+}
+
+export function isJobStale(job: InterpreterJob, now = Date.now()): boolean {
+	if (!['queued', 'running'].includes(job.status) || !job.startedAt) return false;
+	return now - new Date(job.startedAt).getTime() > DEFAULT_JOB_TIMEOUT_MS;
+}
+
+async function markJobTimedOut(job: InterpreterJob): Promise<InterpreterJob> {
+	return saveJob(mergeJobUpdate(job, {
+		status: 'error',
+		phase: 'error',
+		error: JOB_TIMEOUT_ERROR_MESSAGE,
+		completedAt: nowIso()
+	}));
+}
+
 export async function getInterpreterJob(key: string): Promise<InterpreterJob | undefined> {
 	const jobs = await getJobs();
 	const job = jobs[key];
-	return job ? normalizeJob(job) : undefined;
+	if (!job) return undefined;
+	const normalized = normalizeJob(job);
+	return isJobStale(normalized) ? markJobTimedOut(normalized) : normalized;
 }
 
 export async function clearInterpreterJob(key: string): Promise<void> {
@@ -132,11 +165,13 @@ async function saveToObsidianFromBackground(job: InterpreterJob, fileContent: st
 	await openObsidianUrlFromBackground(uriWithContent, job.snapshot.tabId);
 }
 
-async function closeSourceTabAfterSave(tabId: number): Promise<void> {
+async function closeSourceTabAfterSave(tabId: number): Promise<string | undefined> {
 	try {
 		await browser.tabs.remove(tabId);
+		return undefined;
 	} catch {
 		// The user may have already closed the tab. The note was saved, so this is not a job failure.
+		return 'Added to Obsidian, but could not close tab.';
 	}
 }
 
@@ -183,7 +218,7 @@ export function validateInterpreterJobSnapshot(snapshot: InterpreterJobSnapshot)
 
 async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 	job = normalizeJob(job);
-	job = await saveJob({ ...job, status: 'running', startedAt: job.startedAt || nowIso(), error: undefined });
+	job = await saveJobPhase(job, 'validating', { status: 'running', startedAt: job.startedAt || nowIso(), error: undefined });
 
 	try {
 		await loadSettings();
@@ -191,6 +226,7 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 		if (!model) {
 			throw new Error(`Model configuration not found for ${job.snapshot.modelId}`);
 		}
+		const provider = generalSettings.providers.find(provider => provider.id === model.providerId);
 
 		const template: Template = {
 			id: job.snapshot.templateId,
@@ -203,17 +239,36 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			context: job.snapshot.promptContext
 		};
 		const promptVariables = collectPromptVariablesFromTemplate(template);
-		const { promptResponses } = await sendToLLM(
+		job = await saveJobPhase(job, 'sending_to_provider', {
+			metrics: {
+				...job.metrics,
+				providerName: provider?.name,
+				modelName: model.name,
+				promptContextChars: job.snapshot.promptContext.length,
+				contentChars: (job.snapshot.variables.content || '').length,
+				promptVariableCount: promptVariables.length,
+				requestStartedAt: nowIso()
+			}
+		});
+		job = await saveJobPhase(job, 'waiting_for_provider');
+		const { promptResponses, responseChars } = await sendToLLM(
 			job.snapshot.promptContext,
 			job.snapshot.variables.content || '',
 			promptVariables,
 			model
 		);
+		job = await saveJobPhase(job, 'building_note', {
+			metrics: {
+				...job.metrics,
+				responseReceivedAt: nowIso(),
+				responseChars
+			}
+		});
 		const interpreted = applyPromptResponsesToSnapshot(job.snapshot, promptVariables, promptResponses);
 		const frontmatter = await generateFrontmatter(interpreted.properties);
 		const fileContent = frontmatter + interpreted.noteContent;
 
-		job = await saveJob({
+		job = await saveJobPhase(job, job.addToObsidianWhenDone ? 'saving_to_obsidian' : 'done', {
 			...job,
 			status: 'completed',
 			completedAt: nowIso(),
@@ -225,11 +280,28 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 		});
 
 		if (job.addToObsidianWhenDone) {
+			job = await saveJobPhase(job, 'saving_to_obsidian', {
+				metrics: {
+					...job.metrics,
+					saveStartedAt: nowIso()
+				}
+			});
 			await saveToObsidianFromBackground(job, fileContent);
 			await incrementStat('addToObsidian', job.snapshot.vault, interpreted.path, job.snapshot.url, job.snapshot.title);
-			job = await saveJob({ ...job, status: 'saved', savedAt: nowIso() });
+			const savedAt = nowIso();
+			job = await saveJobPhase(job, 'done', {
+				...job,
+				status: 'saved',
+				savedAt,
+				metrics: {
+					...job.metrics,
+					savedAt
+				}
+			});
 			if (job.closeTabAfterSave) {
-				await closeSourceTabAfterSave(job.snapshot.tabId);
+				job = await saveJobPhase(job, 'closing_tab');
+				const closeTabError = await closeSourceTabAfterSave(job.snapshot.tabId);
+				job = await saveJobPhase(job, 'done', { status: 'saved', closeTabError });
 			}
 		}
 
@@ -239,8 +311,10 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 		return saveJob({
 			...job,
 			status: 'error',
+			phase: 'error',
 			error: errorMessage,
-			completedAt: nowIso()
+			completedAt: nowIso(),
+			updatedAt: nowIso()
 		});
 	} finally {
 		runningJobs.delete(job.sessionKey);
@@ -276,11 +350,13 @@ export async function startInterpreterJob(
 			sessionKey,
 			key: sessionKey,
 			status: 'error',
+			phase: 'error',
 			snapshot: { ...snapshot, createdAt: snapshot.createdAt || nowIso() },
 			addToObsidianWhenDone,
 			closeTabAfterSave: options.closeTabAfterSave === true,
 			error: validation.error || 'Could not fully capture the page. Stay on the source tab and retry.',
-			completedAt: nowIso()
+			completedAt: nowIso(),
+			updatedAt: nowIso()
 		});
 	}
 
@@ -290,9 +366,12 @@ export async function startInterpreterJob(
 		sessionKey,
 		key: sessionKey,
 		status: 'queued',
+		phase: 'queued',
 		snapshot: { ...snapshot, createdAt: snapshot.createdAt || nowIso() },
 		addToObsidianWhenDone,
-		closeTabAfterSave: options.closeTabAfterSave === true
+		closeTabAfterSave: options.closeTabAfterSave === true,
+		startedAt: nowIso(),
+		updatedAt: nowIso()
 	};
 
 	await saveJob(job);
