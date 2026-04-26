@@ -24,9 +24,48 @@ function openObsidianUrl(url: string): void {
 	});
 }
 
+export function buildObsidianUrl(
+	noteName: string,
+	path: string,
+	vault: string,
+	behavior: Template['behavior']
+): string {
+	let obsidianUrl: string;
+
+	const isDailyNote = behavior === 'append-daily' || behavior === 'prepend-daily';
+
+	if (isDailyNote) {
+		obsidianUrl = `obsidian://daily?`;
+	} else {
+		if (path && !path.endsWith('/')) {
+			path += '/';
+		}
+
+		const formattedNoteName = sanitizeFileName(noteName);
+		obsidianUrl = `obsidian://new?file=${encodeURIComponent(path + formattedNoteName)}`;
+	}
+
+	if (behavior.startsWith('append')) {
+		obsidianUrl += '&append=true';
+	} else if (behavior.startsWith('prepend')) {
+		obsidianUrl += '&prepend=true';
+	} else if (behavior === 'overwrite') {
+		obsidianUrl += '&overwrite=true';
+	}
+
+	const vaultParam = vault ? `&vault=${encodeURIComponent(vault)}` : '';
+	obsidianUrl += vaultParam;
+
+	if (generalSettings.silentOpen) {
+		obsidianUrl += '&silent=true';
+	}
+
+	return obsidianUrl;
+}
+
 async function tryClipboardWrite(fileContent: string, obsidianUrl: string): Promise<void> {
 	const success = await copyToClipboard(fileContent);
-	
+
 	if (success) {
 		// &clipboard tells Obsidian to read data from clipboard instead of the content param.
 		// content is a fallback shown only if Obsidian can't access the clipboard (e.g. on Linux).
@@ -50,37 +89,7 @@ export async function saveToObsidian(
 	vault: string,
 	behavior: Template['behavior'],
 ): Promise<void> {
-	let obsidianUrl: string;
-
-	const isDailyNote = behavior === 'append-daily' || behavior === 'prepend-daily';
-
-	if (isDailyNote) {
-		obsidianUrl = `obsidian://daily?`;
-	} else {
-		// Ensure path ends with a slash
-		if (path && !path.endsWith('/')) {
-			path += '/';
-		}
-
-		const formattedNoteName = sanitizeFileName(noteName);
-		obsidianUrl = `obsidian://new?file=${encodeURIComponent(path + formattedNoteName)}`;
-	}
-
-	if (behavior.startsWith('append')) {
-		obsidianUrl += '&append=true';
-	} else if (behavior.startsWith('prepend')) {
-		obsidianUrl += '&prepend=true';
-	} else if (behavior === 'overwrite') {
-		obsidianUrl += '&overwrite=true';
-	}
-
-	const vaultParam = vault ? `&vault=${encodeURIComponent(vault)}` : '';
-	obsidianUrl += vaultParam;
-
-	// Add silent parameter if silentOpen is enabled
-	if (generalSettings.silentOpen) {
-		obsidianUrl += '&silent=true';
-	}
+	let obsidianUrl = buildObsidianUrl(noteName, path, vault, behavior);
 
 	if (generalSettings.legacyMode) {
 		// Use the URI method
