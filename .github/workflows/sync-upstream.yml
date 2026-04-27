@@ -1,0 +1,152 @@
+name: Sync upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/obsidianmd/obsidian-clipper.git || git remote set-url upstream https://github.com/obsidianmd/obsidian-clipper.git
+
+      - name: Fetch remotes
+        run: |
+          git fetch origin --tags
+          git fetch upstream --tags
+
+      - name: Check whether upstream changed
+        id: changed
+        run: |
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream main is already contained in origin/main." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deterministic sync
+        if: steps.changed.outputs.changed == 'true'
+        id: deterministic
+        continue-on-error: true
+        run: |
+          bash scripts/sync-upstream-ci.sh --no-push
+
+      - name: Install dependencies
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome == 'success'
+        run: npm ci
+
+      - name: Test deterministic sync
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome == 'success'
+        run: npm test
+
+      - name: Build Firefox deterministic sync
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome == 'success'
+        run: npm run build:firefox
+
+      - name: Push deterministic sync
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome == 'success'
+        run: |
+          git push origin main
+          git push --force-with-lease origin feature/interpreter-extra-api-params
+          git push --force-with-lease origin dev/interpreter-workflow
+
+      - name: AI resolve conflicts
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success'
+        id: ai_resolve
+        continue-on-error: true
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ vars.AI_BASE_URL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+        run: node scripts/ai-resolve-rebase-conflicts.mjs
+
+      - name: Create AI reintegration branch
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        id: ai_branch
+        run: |
+          branch="ai/reintegrate-upstream-$(date -u +%Y%m%d-%H%M%S)"
+          git branch -f "$branch" HEAD
+          git checkout "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Test AI reintegration
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        id: ai_test
+        continue-on-error: true
+        run: |
+          npm ci
+          npm test
+          npm run build:firefox
+
+      - name: Push AI reintegration branch
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        run: |
+          git status --short
+          git push --force-with-lease origin "${{ steps.ai_branch.outputs.branch }}"
+
+      - name: Open draft PR for AI reintegration
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.ai_branch.outputs.branch }}
+          AI_RESULT: ${{ steps.ai_resolve.outcome }}
+          TEST_RESULT: ${{ steps.ai_test.outcome }}
+        run: |
+          old_sha="$(cat .sync-state/main_before_sha.txt 2>/dev/null || true)"
+          new_sha="$(cat .sync-state/upstream_sha.txt 2>/dev/null || true)"
+          conflicts="$(cat .sync-state/conflicted_files.txt 2>/dev/null || true)"
+          summary="$(cat .sync-state/ai-resolution-summary.md 2>/dev/null || echo 'No AI summary was written.')"
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          ## AI-assisted upstream reintegration
+
+          Manual review is required. This PR was opened because deterministic rebase failed.
+
+          - Upstream old SHA: $old_sha
+          - Upstream new SHA: $new_sha
+          - AI resolution result: $AI_RESULT
+          - Tests/build result: $TEST_RESULT
+
+          ## Conflicted files
+
+          \`\`\`
+          $conflicts
+          \`\`\`
+
+          ## AI summary
+
+          $summary
+          EOF
+          gh pr create --draft --base dev/interpreter-workflow --head "$BRANCH" --title "AI-assisted upstream reintegration - manual review required" --body-file "$body"
+
+      - name: Write workflow summary
+        if: always()
+        run: |
+          if [[ -f .sync-state/sync-summary.md ]]; then
+            cat .sync-state/sync-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi

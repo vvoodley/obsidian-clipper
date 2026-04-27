@@ -1,0 +1,130 @@
+name: Sign Firefox unlisted
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: sign-firefox-unlisted
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}firefox/updates.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/interpreter-workflow
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Firefox
+        run: npm run build:firefox
+
+      - name: Prepare Firefox AMO manifest
+        env:
+          CUSTOM_FIREFOX_BUILD: ${{ github.run_number }}
+          FIREFOX_CUSTOM_ADDON_ID: ${{ vars.FIREFOX_CUSTOM_ADDON_ID }}
+          FIREFOX_CUSTOM_ADDON_NAME: ${{ vars.FIREFOX_CUSTOM_ADDON_NAME }}
+          FIREFOX_UPDATE_URL: https://vvoodley.github.io/obsidian-clipper/firefox/updates.json
+        run: node scripts/prepare-firefox-amo.mjs
+
+      - name: Sign unlisted XPI
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: |
+          npx --yes web-ext sign \
+            --source-dir dist_firefox \
+            --channel unlisted \
+            --artifacts-dir web-ext-artifacts \
+            --api-key "$WEB_EXT_API_KEY" \
+            --api-secret "$WEB_EXT_API_SECRET"
+
+      - name: Normalize signed XPI name
+        id: metadata
+        run: |
+          version="$(node -e "console.log(require('./.firefox-build/metadata.json').version)")"
+          basename="$(node -e "console.log(require('./.firefox-build/metadata.json').xpi_basename)")"
+          xpi="$(find web-ext-artifacts -maxdepth 1 -name '*.xpi' -type f | head -n 1)"
+          if [[ -z "$xpi" ]]; then
+            echo "No signed XPI found." >&2
+            exit 1
+          fi
+          mv "$xpi" "web-ext-artifacts/$basename"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "basename=$basename" >> "$GITHUB_OUTPUT"
+          echo "tag=firefox-v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-signed-${{ steps.metadata.outputs.version }}
+          path: |
+            dist_firefox
+            web-ext-artifacts/*.xpi
+            .firefox-build/metadata.json
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          XPI: web-ext-artifacts/${{ steps.metadata.outputs.basename }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$XPI" --clobber
+          else
+            gh release create "$TAG" "$XPI" \
+              --title "Firefox signed XPI $VERSION" \
+              --notes "Unlisted signed Firefox build for Obsidian Web Clipper VVood $VERSION."
+          fi
+
+      - name: Generate Firefox update manifest
+        env:
+          SIGNED_XPI_URL: https://github.com/vvoodley/obsidian-clipper/releases/download/${{ steps.metadata.outputs.tag }}/${{ steps.metadata.outputs.basename }}
+        run: node scripts/generate-firefox-update-manifest.mjs
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Write summary
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          BASENAME: ${{ steps.metadata.outputs.basename }}
+        run: |
+          {
+            echo "## Firefox unlisted signing"
+            echo
+            echo "- Version: $VERSION"
+            echo "- Signed XPI release URL: https://github.com/vvoodley/obsidian-clipper/releases/download/$TAG/$BASENAME"
+            echo "- Update manifest URL: https://vvoodley.github.io/obsidian-clipper/firefox/updates.json"
+            echo "- AMO signing status: complete"
+          } >> "$GITHUB_STEP_SUMMARY"

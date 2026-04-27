@@ -17,6 +17,11 @@ Do not make custom feature changes directly on `main`.
 
 Keep custom work isolated outside `main`. Use `dev/interpreter-workflow` as the working integration branch for builds and day-to-day custom changes. Keep narrower feature branches only when you need to split or upstream a focused change. Push rebased custom branches with `--force-with-lease`, not plain `--force`.
 
+See also:
+
+- `docs/UPSTREAM_SYNC_STRATEGY.md`
+- `docs/FIREFOX_AMO_UNLISTED_SIGNING.md`
+
 ## Manual Sync Flow
 
 ```bash
@@ -71,7 +76,7 @@ Keep changes generic where possible to ease future upstream PRs.
 
 Duplicate filenames and new copies should be controlled by template `noteNameFormat` and behavior. The extension should not append numeric suffixes like `(1)`, `(2)`, or `(3)`.
 
-Templates and prompt text are stored in browser `storage.sync`; template-level Interpreter context and prompt content are part of the template. Use the native Web Clipper template import/export UI to back up templates. Do not store API keys or other secrets in prompt/template backups.
+Templates and prompt text are part of the template. This fork stores large templates in browser `storage.local` to avoid `storage.sync` quota failures. Use the native Web Clipper template import/export UI to back up templates and migrate between browsers. Do not store API keys or other secrets in prompt/template backups.
 
 ## Future-Agent Instructions
 
@@ -81,6 +86,12 @@ Templates and prompt text are stored in browser `storage.sync`; template-level I
 - Never overwrite local uncommitted changes.
 - Summarize conflicts and resolutions.
 - Do not open an upstream PR unless explicitly asked.
+- Do not auto-merge AI-resolved upstream sync branches.
+- Do not push AI-resolved code directly to `main`, `feature/interpreter-extra-api-params`, or `dev/interpreter-workflow`.
+- Keep custom feature changes out of `main`.
+- Preserve the Firefox custom add-on ID: `obsidian-clipper-vvoodley@vvoodley.github.io`.
+- Preserve the Firefox update URL: `https://vvoodley.github.io/obsidian-clipper/firefox/updates.json`.
+- Do not use the official Obsidian add-on ID `clipper@obsidian.md` in signed fork builds.
 
 ## Browser Notes
 
