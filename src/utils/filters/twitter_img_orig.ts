@@ -11,27 +11,28 @@ function normalizeTwitterMediaUrl(value: string): string {
 	}
 }
 
+function normalizeTwitterMediaUrlsInText(value: string): string {
+	return value.replace(/https?:\/\/pbs\.twimg\.com\/media\/[^\s)\]>"']+/g, match => normalizeTwitterMediaUrl(match));
+}
+
 export const twitter_img_orig = (input: string): string => {
 	if (!input.trim()) return input;
 
 	try {
 		const parsed = JSON.parse(input);
 		if (Array.isArray(parsed)) {
-			return JSON.stringify(parsed.map(item => typeof item === 'string' ? normalizeTwitterMediaUrl(item) : item));
+			return JSON.stringify(parsed.map(item => typeof item === 'string' ? normalizeTwitterMediaUrlsInText(item) : item));
 		}
 		if (parsed && typeof parsed === 'object') {
 			return JSON.stringify(Object.fromEntries(
 				Object.entries(parsed).map(([key, value]) => [
 					normalizeTwitterMediaUrl(key),
-					typeof value === 'string' ? normalizeTwitterMediaUrl(value) : value
+					typeof value === 'string' ? normalizeTwitterMediaUrlsInText(value) : value
 				])
 			));
 		}
 	} catch {
-		return input
-			.split(/\r?\n/)
-			.map(line => normalizeTwitterMediaUrl(line))
-			.join('\n');
+		return normalizeTwitterMediaUrlsInText(input);
 	}
 
 	return input;

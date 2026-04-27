@@ -13,14 +13,27 @@ const TEMPLATE_LIST_KEY = 'template_list';
 const CHUNK_SIZE = 8000;
 const SIZE_WARNING_THRESHOLD = 6000;
 
+// AI-heavy templates can exceed browser.storage.sync write quotas during import
+// and autosave. Keep templates local; load from sync only as a migration fallback
+// for existing installations.
+const templateStorage = browser.storage.local;
+const legacyTemplateStorage = browser.storage.sync;
+
 export function setEditingTemplateIndex(index: number): void {
 	editingTemplateIndex = index;
 }
 
 export async function loadTemplates(): Promise<Template[]> {
 	try {
-		const data = await browser.storage.sync.get(['template_list']);
+		let data = await templateStorage.get([TEMPLATE_LIST_KEY]);
 		let templateIds = data.template_list as string[] || [];
+		let loadedFromLegacyStorage = false;
+
+		if (templateIds.length === 0) {
+			data = await legacyTemplateStorage.get([TEMPLATE_LIST_KEY]);
+			templateIds = data.template_list as string[] || [];
+			loadedFromLegacyStorage = templateIds.length > 0;
+		}
 
 		// Filter out any null or undefined values
 		templateIds = templateIds.filter(id => id != null);
@@ -28,7 +41,8 @@ export async function loadTemplates(): Promise<Template[]> {
 		if (templateIds.length > 0) {
 			const loadedTemplates = await Promise.all(templateIds.map(async (id: string) => {
 				try {
-					const result = await browser.storage.sync.get(`template_${id}`);
+					const storage = loadedFromLegacyStorage ? legacyTemplateStorage : templateStorage;
+					const result = await storage.get(`template_${id}`);
 					const compressedChunks = result[`template_${id}`] as string[];
 					if (compressedChunks) {
 						const decompressedData = decompressFromUTF16(compressedChunks.join(''));
@@ -46,6 +60,10 @@ export async function loadTemplates(): Promise<Template[]> {
 			}));
 
 			templates = loadedTemplates.filter((t: Template | null): t is Template => t !== null);
+
+			if (loadedFromLegacyStorage && templates.length > 0) {
+				await saveTemplateSettings();
+			}
 		}
 
 		if (templates.length === 0) {
@@ -87,7 +105,7 @@ export async function saveTemplateSettings(): Promise<string[]> {
 	}
 
 	try {
-		await browser.storage.sync.set({ ...templateChunks, [TEMPLATE_LIST_KEY]: templateIds });
+		await templateStorage.set({ ...templateChunks, [TEMPLATE_LIST_KEY]: templateIds });
 		console.log('Template settings saved');
 		return warnings;
 	} catch (error) {
@@ -182,17 +200,18 @@ export async function deleteTemplate(templateId: string): Promise<boolean> {
 
 		try {
 			// Remove the template from storage
-			await browser.storage.sync.remove(`template_${templateId}`);
+			await templateStorage.remove(`template_${templateId}`);
+			await legacyTemplateStorage.remove(`template_${templateId}`);
 
 			// Get the current template_list
-			const data = await browser.storage.sync.get('template_list');
+			const data = await templateStorage.get(TEMPLATE_LIST_KEY);
 			let templateIds = data.template_list as string[] || [];
 
 			// Remove the deleted template ID from the list
 			templateIds = templateIds.filter(id => id !== templateId);
 
 			// Update the template_list in storage
-			await browser.storage.sync.set({ 'template_list': templateIds });
+			await templateStorage.set({ [TEMPLATE_LIST_KEY]: templateIds });
 
 			console.log(`Template ${templateId} deleted successfully`);
 			return true;
@@ -241,7 +260,7 @@ async function updateGlobalPropertyTypes(templates: Template[]): Promise<void> {
 export async function rebuildTemplateList(): Promise<void> {
 	try {
 		// Get all items in storage
-		const allItems = await browser.storage.sync.get(null);
+		const allItems = await templateStorage.get(null);
 		
 		// Filter for template keys and extract IDs
 		const templateIds = Object.keys(allItems)
@@ -251,7 +270,7 @@ export async function rebuildTemplateList(): Promise<void> {
 		console.log('Found template IDs:', templateIds);
 
 		// Update the template_list in storage
-		await browser.storage.sync.set({ 'template_list': templateIds });
+		await templateStorage.set({ [TEMPLATE_LIST_KEY]: templateIds });
 
 		console.log('Template list rebuilt successfully');
 

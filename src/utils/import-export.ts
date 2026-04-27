@@ -13,6 +13,8 @@ import { compressToUTF16, decompressFromUTF16 } from 'lz-string';
 import { getMessage } from './i18n';
 
 const SCHEMA_VERSION = '0.1.0';
+const TEMPLATE_LIST_KEY = 'template_list';
+const TEMPLATE_KEY_PREFIX = 'template_';
 
 // Add these type definitions at the top
 interface StorageData {
@@ -328,6 +330,12 @@ export async function exportAllSettings(): Promise<void> {
 	try {
 		console.log('Fetching all data from browser storage');
 		const allData = await browser.storage.sync.get(null) as StorageData;
+		const localTemplateData = await browser.storage.local.get(null) as StorageData;
+		for (const [key, value] of Object.entries(localTemplateData)) {
+			if (key === TEMPLATE_LIST_KEY || key.startsWith(TEMPLATE_KEY_PREFIX)) {
+				allData[key] = value;
+			}
+		}
 		console.log('All data fetched:', allData);
 
 		// Create a copy of the data to modify
@@ -386,6 +394,7 @@ async function importAllSettingsFromJson(jsonContent: string): Promise<void> {
 		if (confirm(getMessage('confirmReplaceSettings'))) {
 			// Create a copy of the settings to modify
 			const importData: StorageData = { ...settings };
+			const templateImportData: StorageData = {};
 			
 			// Compress all templates
 			const templateIds = importData.template_list || [];
@@ -410,14 +419,31 @@ async function importAllSettingsFromJson(jsonContent: string): Promise<void> {
 							}
 							importData[key] = chunks;
 						}
+						templateImportData[key] = importData[key];
+						delete importData[key];
 					} catch (error) {
 						console.error(`Failed to process template ${id}:`, error);
 					}
 				}
 			}
 
+			if (templateIds.length > 0) {
+				templateImportData.template_list = templateIds;
+				delete importData.template_list;
+			}
+
+			const existingLocalData = await browser.storage.local.get(null) as StorageData;
+			const existingTemplateKeys = Object.keys(existingLocalData)
+				.filter(key => key === TEMPLATE_LIST_KEY || key.startsWith(TEMPLATE_KEY_PREFIX));
+
+			if (existingTemplateKeys.length > 0) {
+				await browser.storage.local.remove(existingTemplateKeys);
+			}
 			await browser.storage.sync.clear();
 			await browser.storage.sync.set(importData);
+			if (Object.keys(templateImportData).length > 0) {
+				await browser.storage.local.set(templateImportData);
+			}
 			await loadSettings();
 			await loadTemplates();
 			updateTemplateList();
