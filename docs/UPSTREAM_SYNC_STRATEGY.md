@@ -10,6 +10,12 @@ This fork keeps upstream tracking and custom work separate so rebases stay revie
 
 Custom work stays outside `main` so upstream can be fast-forwarded cleanly and custom changes remain easy to review.
 
+## Default Branch Requirement
+
+GitHub scheduled workflows run from the repository default branch. Because this fork keeps workflow automation on `dev/interpreter-workflow`, set the repository default branch to `dev/interpreter-workflow`.
+
+`main` still remains the clean upstream mirror branch even when it is not the GitHub default branch. Do not use `main` for custom feature work.
+
 ## Deterministic Sync Flow
 
 The automated workflow and `scripts/sync-upstream-ci.sh` use this stack:
@@ -26,9 +32,19 @@ If `upstream/main` is already contained in `origin/main`, the workflow exits wit
 
 ## AI-Assisted Conflict Flow
 
-If deterministic rebase fails, canonical branches are not updated. The workflow creates an `ai/reintegrate-upstream-YYYYMMDD-HHMMSS` branch, attempts AI-assisted conflict resolution, runs tests/build, pushes that AI branch, and opens a draft PR against `dev/interpreter-workflow`.
+If deterministic rebase fails, canonical branches are not updated. The script records the failed phase in `.sync-state/rebase_phase.txt` as `feature` or `dev`.
+
+The workflow attempts AI-assisted conflict resolution, then runs:
+
+```bash
+scripts/sync-upstream-ci.sh --continue-after-ai --no-push
+```
+
+If the feature branch failed, this finishes rebasing `feature/interpreter-extra-api-params` and then rebases `dev/interpreter-workflow` onto the resolved feature branch. If the dev branch failed, it finishes the dev rebase. Only after the remaining branch stack is complete does the workflow create an `ai/reintegrate-upstream-YYYYMMDD-HHMMSS` branch, run tests/build, push that branch, and open a draft PR against `dev/interpreter-workflow`.
 
 AI-resolved code must never be auto-merged or auto-pushed to canonical branches. Manual review is required.
+
+If AI refuses a file outside its allowlist or fails before recovery completes, the workflow uploads `.sync-state` as an artifact and opens a manual recovery issue with conflicted files, sync summary, refusal details, and recovery instructions.
 
 ## AI Allowlist
 
@@ -118,3 +134,5 @@ Review the draft PR carefully, inspect the AI summary, run tests/build locally i
 ## Rerun Workflow
 
 Use GitHub Actions → Sync upstream → Run workflow. The workflow is also scheduled every six hours.
+
+Scheduled runs require `dev/interpreter-workflow` to be the repository default branch.

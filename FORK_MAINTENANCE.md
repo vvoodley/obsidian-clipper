@@ -17,6 +17,8 @@ Do not make custom feature changes directly on `main`.
 
 Keep custom work isolated outside `main`. Use `dev/interpreter-workflow` as the working integration branch for builds and day-to-day custom changes. Keep narrower feature branches only when you need to split or upstream a focused change. Push rebased custom branches with `--force-with-lease`, not plain `--force`.
 
+GitHub scheduled workflows run from the repository default branch. This fork expects the default branch to be `dev/interpreter-workflow` so workflow files and scheduled automation are active. `main` still remains the clean upstream mirror branch.
+
 See also:
 
 - `docs/UPSTREAM_SYNC_STRATEGY.md`
@@ -89,6 +91,7 @@ Templates and prompt text are part of the template. This fork stores large templ
 - Do not auto-merge AI-resolved upstream sync branches.
 - Do not push AI-resolved code directly to `main`, `feature/interpreter-extra-api-params`, or `dev/interpreter-workflow`.
 - Keep custom feature changes out of `main`.
+- Keep the GitHub default branch set to `dev/interpreter-workflow` unless workflow files are intentionally moved elsewhere.
 - Preserve the Firefox custom add-on ID: `obsidian-clipper-vvoodley@vvoodley.github.io`.
 - Preserve the Firefox update URL: `https://vvoodley.github.io/obsidian-clipper/firefox/updates.json`.
 - Do not use the official Obsidian add-on ID `clipper@obsidian.md` in signed fork builds.

@@ -85,8 +85,14 @@ jobs:
           AI_MODEL: ${{ vars.AI_MODEL }}
         run: node scripts/ai-resolve-rebase-conflicts.mjs
 
-      - name: Create AI reintegration branch
+      - name: Continue branch stack after AI
         if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        id: ai_continue
+        continue-on-error: true
+        run: bash scripts/sync-upstream-ci.sh --continue-after-ai --no-push
+
+      - name: Create AI reintegration branch
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success' && steps.ai_continue.outcome == 'success'
         id: ai_branch
         run: |
           branch="ai/reintegrate-upstream-$(date -u +%Y%m%d-%H%M%S)"
@@ -95,7 +101,7 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Test AI reintegration
-        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success' && steps.ai_continue.outcome == 'success'
         id: ai_test
         continue-on-error: true
         run: |
@@ -104,13 +110,13 @@ jobs:
           npm run build:firefox
 
       - name: Push AI reintegration branch
-        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success' && steps.ai_continue.outcome == 'success'
         run: |
           git status --short
           git push --force-with-lease origin "${{ steps.ai_branch.outputs.branch }}"
 
       - name: Open draft PR for AI reintegration
-        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success'
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && steps.ai_resolve.outcome == 'success' && steps.ai_continue.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.ai_branch.outputs.branch }}
@@ -143,6 +149,61 @@ jobs:
           $summary
           EOF
           gh pr create --draft --base dev/interpreter-workflow --head "$BRANCH" --title "AI-assisted upstream reintegration - manual review required" --body-file "$body"
+
+      - name: Open manual recovery issue
+        if: steps.changed.outputs.changed == 'true' && steps.deterministic.outcome != 'success' && (steps.ai_resolve.outcome != 'success' || steps.ai_continue.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_RESULT: ${{ steps.ai_resolve.outcome }}
+          CONTINUE_RESULT: ${{ steps.ai_continue.outcome }}
+        run: |
+          old_sha="$(cat .sync-state/main_before_sha.txt 2>/dev/null || true)"
+          new_sha="$(cat .sync-state/upstream_sha.txt 2>/dev/null || true)"
+          conflicts="$(cat .sync-state/conflicted_files.txt 2>/dev/null || true)"
+          summary="$(cat .sync-state/sync-summary.md 2>/dev/null || echo 'No sync summary was written.')"
+          ai_summary="$(cat .sync-state/ai-resolution-summary.md 2>/dev/null || echo 'AI did not write a resolution summary. It may have failed before resolving or refused disallowed files.')"
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          ## Upstream sync requires manual recovery
+
+          Deterministic rebase failed and AI-assisted recovery did not complete.
+
+          - Upstream old SHA: $old_sha
+          - Upstream new SHA: $new_sha
+          - AI resolution result: $AI_RESULT
+          - Continue-after-AI result: $CONTINUE_RESULT
+
+          ## Conflicted files
+
+          \`\`\`
+          $conflicts
+          \`\`\`
+
+          ## Sync summary
+
+          $summary
+
+          ## AI/refusal summary
+
+          $ai_summary
+
+          ## Manual recovery
+
+          1. Fetch origin/upstream locally.
+          2. Inspect the uploaded .sync-state artifact.
+          3. Re-run the rebase stack manually or resume from the failed phase.
+          4. Run npm test and npm run build:firefox.
+          5. Push only after review.
+          EOF
+          gh issue create --title "Manual upstream sync recovery required" --body-file "$body"
+
+      - name: Upload sync state
+        if: always() && steps.changed.outputs.changed == 'true' && (steps.deterministic.outcome != 'success' || failure())
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-state-${{ github.run_id }}
+          path: .sync-state/
+          if-no-files-found: warn
 
       - name: Write workflow summary
         if: always()

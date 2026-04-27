@@ -46,6 +46,27 @@ jobs:
           FIREFOX_UPDATE_URL: https://vvoodley.github.io/obsidian-clipper/firefox/updates.json
         run: node scripts/prepare-firefox-amo.mjs
 
+      - name: Assert Firefox custom identity
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync('dist_firefox/manifest.json', 'utf8'));
+          const gecko = manifest.browser_specific_settings?.gecko || {};
+          const expectedId = 'obsidian-clipper-vvoodley@vvoodley.github.io';
+          const expectedUpdateUrl = 'https://vvoodley.github.io/obsidian-clipper/firefox/updates.json';
+          const text = JSON.stringify(manifest);
+          if (text.includes('clipper@obsidian.md')) {
+            throw new Error('dist_firefox/manifest.json still contains official ID clipper@obsidian.md');
+          }
+          if (gecko.id !== expectedId) {
+            throw new Error(`Unexpected gecko.id: ${gecko.id}`);
+          }
+          if (gecko.update_url !== expectedUpdateUrl) {
+            throw new Error(`Unexpected gecko.update_url: ${gecko.update_url}`);
+          }
+          console.log('Firefox custom identity assertions passed.');
+          NODE
+
       - name: Sign unlisted XPI
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
@@ -100,7 +121,9 @@ jobs:
       - name: Generate Firefox update manifest
         env:
           SIGNED_XPI_URL: https://github.com/vvoodley/obsidian-clipper/releases/download/${{ steps.metadata.outputs.tag }}/${{ steps.metadata.outputs.basename }}
-        run: node scripts/generate-firefox-update-manifest.mjs
+        run: |
+          node scripts/generate-firefox-update-manifest.mjs
+          touch public/.nojekyll
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

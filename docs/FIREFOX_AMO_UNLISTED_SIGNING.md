@@ -2,6 +2,12 @@
 
 Use AMO unlisted signing for this fork. In AMO, choose **On your own**. Do not choose **On this site** unless intentionally publishing publicly.
 
+## Critical Pages Setting
+
+GitHub Pages Source must be **GitHub Actions**.
+
+Do not use **Deploy from a branch** and do not select `/docs` as the Pages source. The `docs/` directory contains Liquid/Twig template examples such as `{% if %}` that Jekyll will try to parse, which can break Pages builds. The signing workflow deploys only the generated `public/` directory and writes `public/.nojekyll` before uploading the Pages artifact.
+
 ## Credentials
 
 Create API credentials in the AMO Developer Hub API key page.
@@ -76,6 +82,8 @@ If Pages is not enabled:
 1. Open repository Settings.
 2. Go to Pages.
 3. Set Source to **GitHub Actions**.
+
+Do not select **Deploy from a branch / docs**.
 
 No separate `vvoodley.github.io` repository is required.
 
