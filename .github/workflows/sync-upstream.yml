@@ -17,11 +17,16 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      TZ: America/Los_Angeles
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Initialize sync state
+        run: mkdir -p .sync-state && touch .sync-state/.keep
 
       - uses: actions/setup-node@v4
         with:
@@ -202,8 +207,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sync-state-${{ github.run_id }}
-          path: .sync-state/
-          if-no-files-found: warn
+          path: .sync-state/**
+          if-no-files-found: ignore
 
       - name: Write workflow summary
         if: always()

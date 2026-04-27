@@ -96,6 +96,15 @@ Do not select **Deploy from a branch / docs**.
 
 No separate `vvoodley.github.io` repository is required.
 
+If deployment fails with an environment protection message like `Branch "dev/interpreter-workflow" is not allowed to deploy to github-pages`, fix the repository environment setting:
+
+1. Open repository Settings.
+2. Go to Environments.
+3. Open `github-pages`.
+4. Under Deployment branches and tags, choose **No restriction** or add `dev/interpreter-workflow` as an allowed deployment branch.
+
+Then confirm Settings → Pages → Source is still **GitHub Actions**. Do not switch to **Deploy from a branch / docs**.
+
 ## Installing and Updating
 
 Install the signed `.xpi` from the GitHub Release asset in Firefox Stable. Firefox reads the custom manifest `update_url` and checks the GitHub Pages `updates.json` for future signed XPI versions.

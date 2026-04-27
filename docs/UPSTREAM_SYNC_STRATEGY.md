@@ -30,6 +30,12 @@ The automated workflow and `scripts/sync-upstream-ci.sh` use this stack:
 
 If `upstream/main` is already contained in `origin/main`, the workflow exits without modifying branches.
 
+## Test Timezone
+
+Template fixture tests include `{{date}}` and `{{time}}` values. `buildVariables()` uses `dayjs().format('YYYY-MM-DDTHH:mm:ssZ')`, which formats in the process local timezone.
+
+The fixture baseline is pinned to `America/Los_Angeles`, including outputs such as `2025-01-15T04:00:00-08:00`. Vitest setup and GitHub Actions set `TZ=America/Los_Angeles` so snapshots are deterministic across local machines and CI. This is only a test determinism setting; it does not change production runtime behavior or template output behavior in the extension.
+
 ## AI-Assisted Conflict Flow
 
 If deterministic rebase fails, canonical branches are not updated. The script records the failed phase in `.sync-state/rebase_phase.txt` as `feature` or `dev`.
