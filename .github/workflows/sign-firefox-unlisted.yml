@@ -38,9 +38,16 @@ jobs:
       - name: Build Firefox
         run: npm run build:firefox
 
+      - name: Compute Firefox build number
+        id: build_number
+        run: |
+          build_number=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          echo "value=$build_number" >> "$GITHUB_OUTPUT"
+          echo "Firefox build number: $build_number"
+
       - name: Prepare Firefox AMO manifest
         env:
-          CUSTOM_FIREFOX_BUILD: ${{ github.run_number }}
+          CUSTOM_FIREFOX_BUILD: ${{ steps.build_number.outputs.value }}
           FIREFOX_CUSTOM_ADDON_ID: ${{ vars.FIREFOX_CUSTOM_ADDON_ID }}
           FIREFOX_CUSTOM_ADDON_NAME: ${{ vars.FIREFOX_CUSTOM_ADDON_NAME }}
           FIREFOX_UPDATE_URL: https://vvoodley.github.io/obsidian-clipper/firefox/updates.json
@@ -142,11 +149,13 @@ jobs:
           VERSION: ${{ steps.metadata.outputs.version }}
           TAG: ${{ steps.metadata.outputs.tag }}
           BASENAME: ${{ steps.metadata.outputs.basename }}
+          FIREFOX_BUILD_NUMBER: ${{ steps.build_number.outputs.value }}
         run: |
           {
             echo "## Firefox unlisted signing"
             echo
             echo "- Version: $VERSION"
+            echo "- Firefox build number: $FIREFOX_BUILD_NUMBER"
             echo "- Signed XPI release URL: https://github.com/vvoodley/obsidian-clipper/releases/download/$TAG/$BASENAME"
             echo "- Update manifest URL: https://vvoodley.github.io/obsidian-clipper/firefox/updates.json"
             echo "- AMO signing status: complete"

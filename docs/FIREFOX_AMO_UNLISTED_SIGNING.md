@@ -54,18 +54,27 @@ Using a custom ID prevents collisions with the official extension and keeps upda
 
 Run GitHub Actions → **Sign Firefox unlisted**.
 
+AMO versions cannot be reused. Re-running the same GitHub Actions run must still produce a distinct Firefox manifest version or AMO will reject the upload. The workflow computes `CUSTOM_FIREFOX_BUILD` as:
+
+```text
+github.run_number * 100 + github.run_attempt
+```
+
+This keeps reruns unique while preserving the natural ordering of workflow runs. For example, run number `42`, attempt `1` becomes build `4201`; attempt `2` becomes `4202`.
+
 The workflow:
 
 1. Checks out `dev/interpreter-workflow`.
 2. Runs `npm ci`.
 3. Runs `npm test`.
 4. Runs `npm run build:firefox`.
-5. Patches `dist_firefox/manifest.json` with custom name, add-on ID, update URL, and AMO-safe version.
-6. Signs using `web-ext sign --channel unlisted`.
-7. Uploads the signed `.xpi` as a workflow artifact.
-8. Creates or updates a GitHub Release with the signed `.xpi`.
-9. Generates `public/firefox/updates.json`.
-10. Deploys the update manifest to GitHub Pages.
+5. Computes a unique Firefox build number from `run_number * 100 + run_attempt`.
+6. Patches `dist_firefox/manifest.json` with custom name, add-on ID, update URL, and AMO-safe version.
+7. Signs using `web-ext sign --channel unlisted`.
+8. Uploads the signed `.xpi` as a workflow artifact.
+9. Creates or updates a GitHub Release with the signed `.xpi`.
+10. Generates `public/firefox/updates.json`.
+11. Deploys the update manifest to GitHub Pages.
 
 Do not use GitHub Actions artifact URLs in `updates.json`; they expire and are not suitable update links. Use GitHub Release asset URLs for the signed XPI.
 
