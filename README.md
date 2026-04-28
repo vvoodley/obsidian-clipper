@@ -17,6 +17,56 @@ Install the extension by downloading it from the official directory for your bro
 
 Documentation is available on the [Obsidian Help site](https://help.obsidian.md/web-clipper), which covers how to use [highlighting](https://help.obsidian.md/web-clipper/highlight), [templates](https://help.obsidian.md/web-clipper/templates), [variables](https://help.obsidian.md/web-clipper/variables), [filters](https://help.obsidian.md/web-clipper/filters), and more.
 
+## Interpreter setup
+
+Interpreter lets you use AI to summarize, extract, and transform web page content before saving it to Obsidian. See the [Interpreter documentation](https://help.obsidian.md/web-clipper/interpreter) for full details.
+
+### Adding a provider
+
+Go to **Settings → Interpreter → Add provider**. For OpenAI-compatible providers (e.g. Fireworks AI, OpenRouter, xAI), set the **Base URL** to the full chat completions endpoint — it should end with `/chat/completions`, for example:
+
+```
+https://api.fireworks.ai/inference/v1/chat/completions
+```
+
+### Adding a model
+
+Go to **Settings → Interpreter → Add model**. Set the **Model ID** to the exact model identifier your provider expects, for example:
+
+```
+accounts/fireworks/models/kimi-k2p5
+```
+
+### Disabling reasoning/thinking
+
+Most Interpreter use cases — summarizing, extracting, tagging — don't benefit from extended reasoning. We recommend disabling it for faster and cheaper responses. In the model settings, add the following to **Extra API parameters JSON**:
+
+```json
+{
+  "thinking": {
+    "type": "disabled"
+  }
+}
+```
+
+Some providers use `reasoning_effort` instead:
+
+```json
+{
+  "reasoning_effort": "none"
+}
+```
+
+### Optimizing the interpreter context
+
+By default, Interpreter sends the full page HTML to the model, which can be slow and costly. You can limit the context per template using the **Default interpreter context** field in your template's advanced settings. For example, to target only the main content area:
+
+```
+{{selectorHtml:#main}}
+```
+
+You can also trim the context with a filter, e.g. `{{content|strip_tags|slice:0,5000}}`. Smaller context means faster and cheaper requests.
+
 ## Contribute
 
 ### Translations
