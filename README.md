@@ -31,11 +31,13 @@ https://api.fireworks.ai/inference/v1/chat/completions
 
 ### Adding a model
 
-Go to **Settings → Interpreter → Add model**. Set the **Model ID** to the exact model identifier your provider expects, for example:
+Go to **Settings → Interpreter → Add model**. Set the **Model ID** to the exact model identifier your provider expects. For example, to use Kimi K2P5 Turbo on Fireworks AI:
 
-```
-accounts/fireworks/models/kimi-k2p5
-```
+- **Provider:** Fireworks AI (your custom provider)
+- **Display name:** Kimi K2P5 Turbo *(customizable)*
+- **Model ID:** `accounts/fireworks/routers/kimi-k2p5-turbo`
+
+The model ID must match exactly what the provider expects. Use the `routers/` path for the auto-routing variant or `models/` for a pinned version (e.g. `accounts/fireworks/models/kimi-k2p5`).
 
 ### Recommended settings for summarization
 
@@ -46,7 +48,6 @@ For summarization, extraction, and tagging tasks we recommend the following **Ex
 ```json
 {
   "temperature": 0.2,
-  "max_tokens": 2048,
   "thinking": {
     "type": "disabled"
   }
@@ -75,6 +76,24 @@ By default, Interpreter sends the full page HTML to the model, which can be slow
 ```
 
 You can also trim the context with a filter, e.g. `{{content|strip_tags|slice:0,5000}}`. Smaller context means faster and cheaper requests.
+
+### Troubleshooting Interpreter errors
+
+**Where to find logs**
+
+There is no log file — all diagnostic output goes to the browser's extension console:
+
+- **Firefox:** Go to `about:debugging#/runtime/this-firefox` → click **Inspect** next to Obsidian Web Clipper → open the **Console** tab. Errors from the background page (where the API call runs) appear here.
+- **Chrome / Chromium:** Go to `chrome://extensions` → click the **service worker** link under the extension → **Console** tab.
+
+**"NetworkError when attempting to fetch resource"**
+
+This typically means the fetch to the AI provider failed before a response was received. Common causes:
+
+- **Wrong Base URL** — ensure the URL ends with `/chat/completions`, e.g. `https://api.fireworks.ai/inference/v1/chat/completions`. A missing or incorrect path suffix is the most common mistake.
+- **Background page suspended (Firefox)** — Firefox may suspend the background event page mid-request on long runs. Check the extension console for the actual error.
+- **API key missing or invalid** — verify your API key is set correctly in provider settings.
+- **Provider CORS policy** — if you see a CORS error in the console alongside the NetworkError, the provider may not accept requests from browser extension origins.
 
 ## Contribute
 
