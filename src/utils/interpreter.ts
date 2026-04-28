@@ -533,7 +533,13 @@ Return exactly one JSON object:
 	const { result, attempts } = await withProviderRetries(
 		async () => {
 			const responseText = await postProviderRequest(provider, requestUrl, headers, requestBody);
-			const data = JSON.parse(responseText);
+			let data;
+			try {
+				data = JSON.parse(responseText);
+			} catch (error) {
+				console.error('Error parsing JSON response:', error);
+				throw new Error(`Failed to parse response from ${provider.name}`);
+			}
 			const content = data.choices?.[0]?.message?.content || responseText;
 			const parsed = extractJsonObject(content);
 			return {
@@ -774,6 +780,8 @@ export async function handleInterpreterUI(
 		}, 10);
 
 		const visionInputs = prepareVisionInputsFromPromptContext(contextToUse, modelConfig);
+		// Batching is orchestrated by the background Interpret-and-Add job. The
+		// manual popup Interpret button intentionally keeps the one-shot path.
 		const { promptResponses } = await sendToLLM(contextToUse, contentToProcess, promptVariables, modelConfig, {
 			visionImages: visionInputs.visionImages,
 			visionCandidateCount: visionInputs.candidateCount,

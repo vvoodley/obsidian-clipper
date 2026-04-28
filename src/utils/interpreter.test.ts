@@ -204,4 +204,56 @@ describe('sendToLLM timeout and parsing', () => {
 		expect(result.images[0]).toMatchObject({ status: 'described', inspected: true });
 		vi.useRealTimers();
 	});
+
+	it('retries vision batch descriptions when provider envelope JSON is malformed first', async () => {
+		vi.useFakeTimers();
+		vi.spyOn(Math, 'random').mockReturnValue(0);
+		const fetchMock = vi.fn()
+			.mockResolvedValueOnce({
+				ok: true,
+				text: async () => '{not json'
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				text: async () => JSON.stringify({
+					choices: [{
+						message: {
+							content: JSON.stringify({
+								images: [{
+									status: 'described',
+									description: 'A recovered gallery image.',
+									visibleText: '',
+									uncertainty: 'low'
+								}]
+							})
+						}
+					}]
+				})
+			});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const promise = sendVisionBatchDescriptionToLLM('context', [
+			{ source: 'post_gallery', index: 1, sourceUrl: 'https://i.redd.it/1.jpg', remoteUrl: 'https://i.redd.it/1.jpg' }
+		], {
+			id: 'model-a',
+			providerId: 'provider-a',
+			providerModelId: 'model-a',
+			name: 'Model A',
+			enabled: true,
+			visionEnabled: true,
+			visionImageMode: 'url'
+		}, {
+			batchIndex: 1,
+			totalBatches: 1,
+			candidateCount: 1
+		});
+
+		await vi.advanceTimersByTimeAsync(1000);
+		const result = await promise;
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(result.attempts).toBe(2);
+		expect(result.images[0]).toMatchObject({ status: 'described', inspected: true });
+		vi.useRealTimers();
+	});
 });

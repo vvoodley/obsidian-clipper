@@ -326,12 +326,16 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 				mediaDiagnostics = buildMediaDiagnostics(job.snapshot.promptContext, visionPlan, visionBatchResults);
 				const failures = visionBatchResults.filter(result => result.error || result.images.some(image => image.status === 'failed')).length;
 				const retries = visionBatchResults.reduce((sum, result) => sum + Math.max(0, result.attempts - 1), 0);
+				const skippedBatches = visionBatchResults.filter(result => result.attempts === 0).length;
+				const attemptedBatchRequests = visionBatchResults.reduce((sum, result) => sum + result.attempts, 0);
 				job = await saveJobPhase(job, 'describing_vision_batches', {
 					visionBatchResults,
 					mediaDiagnostics,
 					metrics: {
 						...job.metrics,
-						providerRequestCount: visionBatchResults.length,
+						providerRequestCount: attemptedBatchRequests,
+						visionBatchAttemptCount: attemptedBatchRequests,
+						visionBatchSkippedCount: skippedBatches,
 						visionBatchFailures: failures,
 						visionBatchRetries: retries
 					}

@@ -229,6 +229,8 @@ export interface InterpreterJob {
 		visionBatchingEnabled?: boolean;
 		visionBatchCount?: number;
 		visionBatchSize?: number;
+		visionBatchAttemptCount?: number;
+		visionBatchSkippedCount?: number;
 		visionBatchFailures?: number;
 		visionBatchRetries?: number;
 		finalSynthesisResponseChars?: number;

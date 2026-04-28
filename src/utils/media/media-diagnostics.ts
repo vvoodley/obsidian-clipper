@@ -44,7 +44,7 @@ export function buildMediaDiagnostics(
 	if (videoCandidateUrls.length > 0) deterministicTags.push('media/has-video-candidate', 'workflow/needs-video-download');
 	if (imageSkippedCount > 0) deterministicTags.push('media/has-uninspected-images', 'workflow/needs-media-review');
 	if (imageFailedCount > 0) deterministicTags.push('media/vision-partial', 'workflow/needs-media-review');
-	if (plan.candidateCount > 0 && imageInspectedCount === 0 && !plan.shouldBatch) {
+	if (plan.candidateCount > 0 && imageInspectedCount === 0) {
 		deterministicTags.push('media/vision-not-run', 'workflow/needs-media-review');
 	}
 
@@ -72,7 +72,7 @@ function parseYamlTagBlock(lines: string[], tagLineIndex: number): { existing: s
 	let insertAt = tagLineIndex + 1;
 	for (let index = tagLineIndex + 1; index < lines.length; index++) {
 		if (/^\s*-\s+/.test(lines[index])) {
-			existing.push(lines[index].replace(/^\s*-\s+/, '').trim());
+			existing.push(lines[index].replace(/^\s*-\s+/, '').trim().replace(/^['"]|['"]$/g, ''));
 			insertAt = index + 1;
 			continue;
 		}

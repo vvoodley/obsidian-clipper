@@ -86,6 +86,42 @@ https://example.com/articles/video-game-guide`)).toEqual(['https://example.com/a
 		expect(diagnostics.deterministicTags).toContain('media/vision-batched');
 	});
 
+	it('adds vision-not-run when batched images are skipped without inspection', () => {
+		const batchResults: VisionBatchResult[] = [{
+			batchIndex: 1,
+			totalBatches: 1,
+			attempts: 0,
+			startedAt: '2026-01-01T00:00:00.000Z',
+			images: [{
+				source: 'post_gallery',
+				index: 1,
+				url: 'https://i.redd.it/a.jpg',
+				inspected: false,
+				status: 'skipped',
+				error: 'unsupported provider'
+			}]
+		}];
+		const diagnostics = buildMediaDiagnostics('', { ...basePlan, candidateCount: 1, shouldBatch: true }, batchResults);
+		expect(diagnostics.imageInspectedCount).toBe(0);
+		expect(diagnostics.deterministicTags).toContain('media/vision-not-run');
+		expect(diagnostics.deterministicTags).toContain('workflow/needs-media-review');
+	});
+
+	it('does not duplicate quoted block-style tags', () => {
+		const note = `---
+tags:
+  - "media/vision-batched"
+  - 'workflow/needs-media-review'
+---
+Body`;
+		const result = addDeterministicMediaTagsToNoteContent(note, {
+			deterministicTags: ['media/vision-batched', 'workflow/needs-media-review']
+		});
+
+		expect(result.match(/media\/vision-batched/g)).toHaveLength(1);
+		expect(result.match(/workflow\/needs-media-review/g)).toHaveLength(1);
+	});
+
 	it('inserts deterministic tags into existing YAML frontmatter', () => {
 		const note = `---
 tags:
