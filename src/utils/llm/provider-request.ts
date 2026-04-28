@@ -196,8 +196,7 @@ export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProvi
 	return {
 		requestBody: {
 			model: model.providerModelId,
-			messages: buildTextOnlyMessages(systemContent, promptContext, promptContent),
-			temperature: 0.2
+			messages: buildTextOnlyMessages(systemContent, promptContext, promptContent)
 		},
 		supportsVision,
 		attachedImageCount: 0,

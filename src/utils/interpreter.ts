@@ -10,12 +10,48 @@ import { updateTokenCount } from './token-counter';
 import { mergeExtraRequestBody } from './extra-request-body';
 import { buildProviderRequest } from './llm/provider-request';
 import { prepareVisionInputsFromPromptContext } from './media/image-attachments';
+import browser from './browser-polyfill';
 import type { VisionImageAttachment } from './media/image-types';
 
 // Store event listeners for cleanup
 const eventListeners = new WeakMap<HTMLElement, { [key: string]: EventListener }>();
 export const DEFAULT_LLM_TIMEOUT_MS = 300_000;
 export const LLM_TIMEOUT_ERROR_MESSAGE = 'AI provider timed out after 300 seconds.';
+
+function isCorsLikeNetworkError(error: unknown): boolean {
+	return error instanceof TypeError
+		&& /networkerror|failed to fetch|load failed/i.test(error.message || '');
+}
+
+async function fetchViaBackgroundProxy(url: string, init: RequestInit): Promise<{ response: Pick<Response, 'ok' | 'status' | 'statusText'>; responseText: string }> {
+	const proxyResult = await browser.runtime.sendMessage({
+		action: 'fetchProxy',
+		url,
+		options: {
+			method: init.method,
+			headers: init.headers,
+			body: init.body
+		}
+	}) as { ok?: boolean; status?: number; statusText?: string; text?: string; error?: string } | undefined;
+
+	if (!proxyResult) {
+		throw new Error('Background fetch proxy returned no response.');
+	}
+	if (proxyResult.error) {
+		throw new Error(proxyResult.error === 'CORS_PERMISSION_NEEDED'
+			? 'Firefox blocked the AI provider request. Grant host permissions for the provider URL and reload the extension.'
+			: proxyResult.error);
+	}
+
+	return {
+		response: {
+			ok: proxyResult.ok === true,
+			status: proxyResult.status ?? 0,
+			statusText: proxyResult.statusText || ''
+		},
+		responseText: proxyResult.text || ''
+	};
+}
 
 export async function sendToLLM(
 	promptContext: string,
@@ -132,15 +168,28 @@ export async function sendToLLM(
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), DEFAULT_LLM_TIMEOUT_MS);
 		let response: Response;
-		let responseText: string;
+		let responseText: string | undefined;
 		try {
-			response = await fetch(requestUrl, {
+			const fetchInit: RequestInit = {
 				method: 'POST',
 				headers: headers,
 				body: JSON.stringify(requestBody),
 				signal: controller.signal
-			});
-			responseText = await response.text();
+			};
+			try {
+				response = await fetch(requestUrl, fetchInit);
+			} catch (error) {
+				if (!isCorsLikeNetworkError(error)) {
+					throw error;
+				}
+				console.warn(`${provider.name} request failed in the current extension context; retrying through background fetch proxy.`);
+				const proxied = await fetchViaBackgroundProxy(requestUrl, fetchInit);
+				response = proxied.response as Response;
+				responseText = proxied.responseText;
+			}
+			if (responseText === undefined) {
+				responseText = await response.text();
+			}
 		} catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
 				throw new Error(LLM_TIMEOUT_ERROR_MESSAGE);

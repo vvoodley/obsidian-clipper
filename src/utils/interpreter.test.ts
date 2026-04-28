@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import browser from 'webextension-polyfill';
 import { generalSettings } from './storage-utils';
 import { DEFAULT_LLM_TIMEOUT_MS, LLM_TIMEOUT_ERROR_MESSAGE, sendToLLM } from './interpreter';
 
@@ -55,5 +56,36 @@ describe('sendToLLM timeout and parsing', () => {
 			name: 'Model A',
 			enabled: true
 		})).rejects.toThrow('AI provider returned a response, but Web Clipper could not parse the prompt responses.');
+	});
+
+	it('retries provider requests through the background fetch proxy after a CORS-like network error', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => {
+			throw new TypeError('NetworkError when attempting to fetch resource.');
+		}));
+		const sendMessage = vi.spyOn(browser.runtime, 'sendMessage').mockResolvedValue({
+			ok: true,
+			status: 200,
+			text: JSON.stringify({
+				choices: [{
+					message: {
+						content: JSON.stringify({ prompts_responses: { prompt_1: 'summary result' } })
+					}
+				}]
+			})
+		});
+
+		const result = await sendToLLM('context', 'content', [{ key: 'prompt_1', prompt: 'summary' }], {
+			id: 'model-a',
+			providerId: 'provider-a',
+			providerModelId: 'model-a',
+			name: 'Model A',
+			enabled: true
+		});
+
+		expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+			action: 'fetchProxy',
+			url: 'https://api.example.com/chat/completions'
+		}));
+		expect(result.promptResponses[0].user_response).toBe('summary result');
 	});
 });
