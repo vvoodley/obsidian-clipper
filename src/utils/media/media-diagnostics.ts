@@ -9,7 +9,7 @@ function unique(values: string[]): string[] {
 
 export function extractVideoCandidateUrls(promptContext: string): string[] {
 	const strongVideoUrls = (promptContext.match(URL_REGEX) || []).filter(url =>
-		/v\.redd\.it|\.mp4(?:[?#]|$)|\.m3u8(?:[?#]|$)|\.webm(?:[?#]|$)|\.mov(?:[?#]|$)/i.test(url)
+		/v\.redd\.it|(?:youtube\.com|youtu\.be)\/|\.mp4(?:[?#]|$)|\.m3u8(?:[?#]|$)|\.webm(?:[?#]|$)|\.mov(?:[?#]|$)/i.test(url)
 	);
 	const sectionUrls: string[] = [];
 	const lines = promptContext.split(/\r?\n/);
@@ -17,7 +17,11 @@ export function extractVideoCandidateUrls(promptContext: string): string[] {
 		if (!/(video candidates|reddit video candidates|possible videos|og:video)/i.test(lines[index])) continue;
 		for (let offset = 0; offset <= 12 && index + offset < lines.length; offset++) {
 			const line = lines[index + offset];
-			if (offset > 0 && /^\s*(?:#{1,6}\s+|[A-Z][A-Z _-]{6,}:)\s*/.test(line) && !/(video|og:video)/i.test(line)) break;
+			const trimmed = line.trim();
+			const isSectionBoundary =
+				/^VISION_IMAGE_URLS_(?:START|END)$/.test(trimmed) ||
+				/^\s*(?:#{1,6}\s+|[A-Z][A-Z _/-]{6,}:?)\s*$/.test(line);
+			if (offset > 0 && isSectionBoundary && !/(video|og:video)/i.test(line)) break;
 			sectionUrls.push(...(line.match(URL_REGEX) || []));
 		}
 	}
@@ -40,6 +44,7 @@ export function buildMediaDiagnostics(
 	const deterministicTags: string[] = [];
 	const warnings = [...plan.warnings];
 
+	if (plan.candidateCount > 0) deterministicTags.push('media/has-possible-image');
 	if (plan.shouldBatch) deterministicTags.push('media/vision-batched');
 	if (videoCandidateUrls.length > 0) deterministicTags.push('media/has-video-candidate', 'workflow/needs-video-download');
 	if (imageSkippedCount > 0) deterministicTags.push('media/has-uninspected-images', 'workflow/needs-media-review');

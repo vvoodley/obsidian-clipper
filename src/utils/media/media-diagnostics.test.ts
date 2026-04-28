@@ -33,10 +33,35 @@ https://v.redd.it/example`)).toEqual([
 		expect(diagnostics.deterministicTags).toContain('workflow/needs-video-download');
 	});
 
+	it('treats YouTube links as strong video candidates', () => {
+		expect(extractVideoCandidateUrls('https://www.youtube.com/watch?v=abc123')).toEqual([
+			'https://www.youtube.com/watch?v=abc123'
+		]);
+		expect(extractVideoCandidateUrls('https://youtu.be/abc123')).toEqual([
+			'https://youtu.be/abc123'
+		]);
+	});
+
+	it('adds possible image tag only when image candidates exist', () => {
+		expect(buildMediaDiagnostics('', basePlan).deterministicTags).not.toContain('media/has-possible-image');
+		expect(buildMediaDiagnostics('', { ...basePlan, candidateCount: 1 }).deterministicTags).toContain('media/has-possible-image');
+	});
+
 	it('does not treat arbitrary URLs containing video as video candidates outside video sections', () => {
 		expect(extractVideoCandidateUrls('https://example.com/articles/video-game-guide')).toEqual([]);
 		expect(extractVideoCandidateUrls(`Reddit video candidates:
 https://example.com/articles/video-game-guide`)).toEqual(['https://example.com/articles/video-game-guide']);
+	});
+
+	it('does not treat image URLs after an empty video section as video candidates', () => {
+		expect(extractVideoCandidateUrls(`Video candidates:
+
+VISION_IMAGE_URLS_START
+
+POST_IMAGE_1:
+https://preview.redd.it/gallery-1.png?width=1920&format=png
+
+VISION_IMAGE_URLS_END`)).toEqual([]);
 	});
 
 	it('marks single-shot unsupported provider diagnostics as vision not run', () => {
