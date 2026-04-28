@@ -77,6 +77,12 @@ By default, Interpreter sends the full page HTML to the model, which can be slow
 
 You can also trim the context with a filter, e.g. `{{content|strip_tags|slice:0,5000}}`. Smaller context means faster and cheaper requests.
 
+### Vision batching
+
+This fork supports opt-in vision batching for templates that expose image candidate URLs. Vision batching currently runs in the background **Interpret and Add** job path; the manual **interpret** button still uses the one-shot path.
+
+In batch mode, `maxVisionImages` is treated as the per-request cap. `visionBatchSize` defaults to `5` and is clamped to that per-request limit. The implemented image transport is URL-based OpenAI-compatible `image_url` content blocks. Non-vision or unsupported providers fall back to text-only, or mark image batches as skipped / `media/vision-not-run` for later review.
+
 ### Troubleshooting Interpreter errors
 
 **Where to find logs**
