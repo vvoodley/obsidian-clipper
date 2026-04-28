@@ -7,10 +7,12 @@ function unique(values: string[]): string[] {
 	return Array.from(new Set(values));
 }
 
+function isStrongVideoUrl(url: string): boolean {
+	return /v\.redd\.it|(?:youtube\.com|youtu\.be)\/|\.mp4(?:[?#]|$)|\.m3u8(?:[?#]|$)|\.webm(?:[?#]|$)|\.mov(?:[?#]|$)/i.test(url);
+}
+
 export function extractVideoCandidateUrls(promptContext: string): string[] {
-	const strongVideoUrls = (promptContext.match(URL_REGEX) || []).filter(url =>
-		/v\.redd\.it|(?:youtube\.com|youtu\.be)\/|\.mp4(?:[?#]|$)|\.m3u8(?:[?#]|$)|\.webm(?:[?#]|$)|\.mov(?:[?#]|$)/i.test(url)
-	);
+	const strongVideoUrls = (promptContext.match(URL_REGEX) || []).filter(isStrongVideoUrl);
 	const sectionUrls: string[] = [];
 	const lines = promptContext.split(/\r?\n/);
 	for (let index = 0; index < lines.length; index++) {
@@ -22,7 +24,7 @@ export function extractVideoCandidateUrls(promptContext: string): string[] {
 				/^VISION_IMAGE_URLS_(?:START|END)$/.test(trimmed) ||
 				/^\s*(?:#{1,6}\s+|[A-Z][A-Z _/-]{6,}:?)\s*$/.test(line);
 			if (offset > 0 && isSectionBoundary && !/(video|og:video)/i.test(line)) break;
-			sectionUrls.push(...(line.match(URL_REGEX) || []));
+			sectionUrls.push(...(line.match(URL_REGEX) || []).filter(isStrongVideoUrl));
 		}
 	}
 	return unique([...strongVideoUrls, ...sectionUrls]);
@@ -64,6 +66,53 @@ export function buildMediaDiagnostics(
 		deterministicTags: unique(deterministicTags),
 		warnings
 	};
+}
+
+export function formatDeterministicMediaSectionGuidance(diagnostics?: MediaDiagnostics): string {
+	if (!diagnostics) return '';
+	const imageCandidateCount = diagnostics.imageCandidateCount ?? 0;
+	const inspectedCount = diagnostics.imageInspectedCount ?? 0;
+	const hasBatchedEvidence = diagnostics.deterministicTags?.includes('media/vision-batched') === true;
+	const hasImageEvidence = imageCandidateCount > 0;
+	const lines = [
+		'DETERMINISTIC_MEDIA_SECTION_GUIDANCE_START',
+		`Image candidates found: ${imageCandidateCount}`,
+		`Images attached or described by vision: ${inspectedCount}`,
+		`Batched vision notes present: ${hasBatchedEvidence ? 'yes' : 'no'}`
+	];
+	if (hasImageEvidence) {
+		lines.push('Include a Visual analysis section when the template asks for one. Base it only on attached images, batched vision notes, or listed image candidates that are explicitly marked as uninspected.');
+	} else {
+		lines.push('Do not include a Visual analysis section. No template-scoped image candidates were captured.');
+	}
+	lines.push('Do not infer visual contents from URLs alone.');
+	lines.push('DETERMINISTIC_MEDIA_SECTION_GUIDANCE_END');
+	return lines.join('\n');
+}
+
+export function appendDeterministicMediaSectionGuidance(promptContext: string, diagnostics?: MediaDiagnostics): string {
+	const guidance = formatDeterministicMediaSectionGuidance(diagnostics);
+	return guidance ? `${promptContext}\n\n${guidance}` : promptContext;
+}
+
+export function removeVisualAnalysisSectionWhenNoImages(noteContent: string, diagnostics?: MediaDiagnostics): string {
+	if ((diagnostics?.imageCandidateCount ?? 0) > 0) return noteContent;
+	const newline = noteContent.includes('\r\n') ? '\r\n' : '\n';
+	const lines = noteContent.split(/\r?\n/);
+	const startIndex = lines.findIndex(line => /^#{2,6}\s+Visual analysis\s*$/i.test(line.trim()));
+	if (startIndex === -1) return noteContent;
+	let endIndex = lines.length;
+	for (let index = startIndex + 1; index < lines.length; index++) {
+		if (/^#{2,6}\s+\S/.test(lines[index].trim())) {
+			endIndex = index;
+			break;
+		}
+	}
+	const before = lines.slice(0, startIndex);
+	const after = lines.slice(endIndex);
+	while (before.length > 0 && before[before.length - 1].trim() === '') before.pop();
+	while (after.length > 0 && after[0].trim() === '') after.shift();
+	return [...before, ...(before.length && after.length ? [''] : []), ...after].join(newline).trimStart();
 }
 
 function parseYamlTagBlock(lines: string[], tagLineIndex: number): { existing: string[]; insertAt: number; mode: 'list' | 'inline' } {

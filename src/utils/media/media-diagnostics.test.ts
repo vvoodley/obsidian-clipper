@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { addDeterministicMediaTagsToNoteContent, buildMediaDiagnostics, extractVideoCandidateUrls } from './media-diagnostics';
+import {
+	addDeterministicMediaTagsToNoteContent,
+	appendDeterministicMediaSectionGuidance,
+	buildMediaDiagnostics,
+	extractVideoCandidateUrls,
+	formatDeterministicMediaSectionGuidance,
+	removeVisualAnalysisSectionWhenNoImages
+} from './media-diagnostics';
 import type { VisionProcessingPlan } from './vision-plan';
 import type { VisionBatchResult } from '../../types/types';
 
@@ -47,10 +54,63 @@ https://v.redd.it/example`)).toEqual([
 		expect(buildMediaDiagnostics('', { ...basePlan, candidateCount: 1 }).deterministicTags).toContain('media/has-possible-image');
 	});
 
+	it('formats deterministic guidance to omit visual analysis when no images exist', () => {
+		const diagnostics = buildMediaDiagnostics('', basePlan);
+		const guidance = formatDeterministicMediaSectionGuidance(diagnostics);
+		expect(guidance).toContain('Image candidates found: 0');
+		expect(guidance).toContain('Do not include a Visual analysis section.');
+	});
+
+	it('formats deterministic guidance to include visual analysis when images exist', () => {
+		const diagnostics = buildMediaDiagnostics('', { ...basePlan, candidateCount: 2 }, [], { singleShotAttachedCount: 2 });
+		const guidance = formatDeterministicMediaSectionGuidance(diagnostics);
+		expect(guidance).toContain('Image candidates found: 2');
+		expect(guidance).toContain('Include a Visual analysis section');
+	});
+
+	it('appends deterministic media section guidance to prompt context', () => {
+		const result = appendDeterministicMediaSectionGuidance('context', buildMediaDiagnostics('', basePlan));
+		expect(result).toContain('context');
+		expect(result).toContain('DETERMINISTIC_MEDIA_SECTION_GUIDANCE_START');
+	});
+
+	it('removes visual analysis from returned note content when no images exist', () => {
+		const note = `### Short summary
+Summary.
+
+### Visual analysis
+No image was attached as a vision input; visual contents cannot be verified.
+
+### Takeaways
+- One`;
+		const result = removeVisualAnalysisSectionWhenNoImages(note, buildMediaDiagnostics('', basePlan));
+		expect(result).not.toContain('### Visual analysis');
+		expect(result).toContain('### Short summary');
+		expect(result).toContain('### Takeaways');
+	});
+
+	it('keeps visual analysis when image candidates exist', () => {
+		const note = `### Short summary
+Summary.
+
+### Visual analysis
+Image details.
+
+### Takeaways
+- One`;
+		const result = removeVisualAnalysisSectionWhenNoImages(note, buildMediaDiagnostics('', { ...basePlan, candidateCount: 1 }));
+		expect(result).toContain('### Visual analysis');
+	});
+
 	it('does not treat arbitrary URLs containing video as video candidates outside video sections', () => {
 		expect(extractVideoCandidateUrls('https://example.com/articles/video-game-guide')).toEqual([]);
 		expect(extractVideoCandidateUrls(`Reddit video candidates:
-https://example.com/articles/video-game-guide`)).toEqual(['https://example.com/articles/video-game-guide']);
+https://example.com/articles/video-game-guide`)).toEqual([]);
+	});
+
+	it('does not treat Reddit gallery URLs in video sections as video candidates', () => {
+		expect(extractVideoCandidateUrls(`Video candidates:
+https://www.reddit.com/gallery/1swldii`)).toEqual([]);
 	});
 
 	it('does not treat image URLs after an empty video section as video candidates', () => {

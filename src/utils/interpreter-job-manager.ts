@@ -7,7 +7,12 @@ import { Template } from '../types/types';
 import type { InterpreterJobPhase } from '../types/types';
 import { prepareVisionProcessingPlan } from './media/vision-plan';
 import { appendVisionBatchResultsToPromptContext } from './media/vision-batch-summary';
-import { addDeterministicMediaTagsToNoteContent, buildMediaDiagnostics } from './media/media-diagnostics';
+import {
+	addDeterministicMediaTagsToNoteContent,
+	appendDeterministicMediaSectionGuidance,
+	buildMediaDiagnostics,
+	removeVisualAnalysisSectionWhenNoImages
+} from './media/media-diagnostics';
 import { getAttachedVisionImageCountForProvider } from './llm/provider-request';
 
 const STORAGE_KEY = 'interpreter_jobs';
@@ -343,9 +348,10 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			}
 		}
 
-		const finalPromptContext = visionPlan.shouldBatch
+		const finalPromptContextBase = visionPlan.shouldBatch
 			? appendVisionBatchResultsToPromptContext(job.snapshot.promptContext, visionBatchResults, mediaDiagnostics)
 			: job.snapshot.promptContext;
+		const finalPromptContext = appendDeterministicMediaSectionGuidance(finalPromptContextBase, mediaDiagnostics);
 
 		const finalVisionImages = visionPlan.shouldBatch ? [] : singleShotImages;
 		const finalVisionWarnings = visionPlan.warnings;
@@ -401,6 +407,7 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			}
 		});
 		const interpreted = applyPromptResponsesToSnapshot(job.snapshot, promptVariables, promptResponses);
+		interpreted.noteContent = removeVisualAnalysisSectionWhenNoImages(interpreted.noteContent, mediaDiagnostics);
 		const frontmatter = await generateFrontmatter(interpreted.properties);
 		const fileContent = addDeterministicMediaTagsToNoteContent(frontmatter + interpreted.noteContent, mediaDiagnostics);
 
