@@ -112,4 +112,37 @@ VISION_IMAGE_URLS_END`;
 			'https://pbs.twimg.com/media/BBB?format=png&name=orig'
 		]);
 	});
+
+	it('extracts generic post gallery markers up to twenty slots', () => {
+		const lines = Array.from({ length: 20 }, (_, index) => `POST_IMAGE_${index + 1}:
+https://i.redd.it/gallery-${index + 1}.jpg`).join('\n');
+		const input = `VISION_IMAGE_URLS_START
+${lines}
+VISION_IMAGE_URLS_END`;
+
+		const candidates = extractVisionImageCandidates(input);
+		expect(candidates).toHaveLength(20);
+		expect(candidates[0]).toEqual({
+			url: 'https://i.redd.it/gallery-1.jpg',
+			source: 'post_gallery',
+			priority: 1,
+			index: 1
+		});
+		expect(candidates[19]).toEqual({
+			url: 'https://i.redd.it/gallery-20.jpg',
+			source: 'post_gallery',
+			priority: 20,
+			index: 20
+		});
+	});
+
+	it('respects selected max images for larger post galleries', () => {
+		const lines = Array.from({ length: 12 }, (_, index) => `REDDIT_POST_IMAGE_${index + 1}:
+https://i.redd.it/reddit-${index + 1}.jpg`).join('\n');
+		const candidates = extractVisionImageCandidates(`VISION_IMAGE_URLS_START
+${lines}
+VISION_IMAGE_URLS_END`);
+
+		expect(selectVisionImageCandidates(candidates, 5).map(candidate => candidate.index)).toEqual([1, 2, 3, 4, 5]);
+	});
 });

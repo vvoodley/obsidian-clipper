@@ -3,7 +3,7 @@ import type { VisionImageCandidate, VisionImageSource } from './image-types';
 const START_MARKER = 'VISION_IMAGE_URLS_START';
 const END_MARKER = 'VISION_IMAGE_URLS_END';
 
-const MAX_TOTAL_IMAGES = 8;
+const MAX_TOTAL_IMAGES = 20;
 
 const FIELD_DEFINITIONS: Array<{ marker: string; source: VisionImageSource; priority: number; index: number }> = [
 	{ marker: 'MAIN_POST_FIRST_IMAGE', source: 'main_post', priority: 1, index: 1 },
@@ -17,6 +17,21 @@ const FIELD_DEFINITIONS: Array<{ marker: string; source: VisionImageSource; prio
 	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_3', source: 'quoted_or_embedded_post', priority: 7, index: 3 },
 	{ marker: 'QUOTED_OR_EMBEDDED_POST_IMAGE_4', source: 'quoted_or_embedded_post', priority: 8, index: 4 }
 ];
+
+for (let index = 1; index <= MAX_TOTAL_IMAGES; index++) {
+	FIELD_DEFINITIONS.push({
+		marker: `POST_IMAGE_${index}`,
+		source: 'post_gallery',
+		priority: index,
+		index
+	});
+	FIELD_DEFINITIONS.push({
+		marker: `REDDIT_POST_IMAGE_${index}`,
+		source: 'post_gallery',
+		priority: index,
+		index
+	});
+}
 
 function getMarkedBlock(promptContext: string): string | undefined {
 	const startIndex = promptContext.indexOf(START_MARKER);

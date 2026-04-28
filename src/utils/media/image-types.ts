@@ -1,4 +1,4 @@
-export type VisionImageSource = 'main_post' | 'quoted_or_embedded_post';
+export type VisionImageSource = 'main_post' | 'quoted_or_embedded_post' | 'post_gallery';
 
 export interface VisionImageCandidate {
 	url: string;
