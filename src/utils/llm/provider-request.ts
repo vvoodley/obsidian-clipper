@@ -184,7 +184,8 @@ export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProvi
 						role: 'user',
 						content: buildOpenAICompatibleVisionContent(promptContext, promptContent, requestedVisionImages)
 					}
-				]
+				],
+				temperature: 0.2
 			},
 			supportsVision: true,
 			attachedImageCount: requestedVisionImages.length,
@@ -195,7 +196,8 @@ export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProvi
 	return {
 		requestBody: {
 			model: model.providerModelId,
-			messages: buildTextOnlyMessages(systemContent, promptContext, promptContent)
+			messages: buildTextOnlyMessages(systemContent, promptContext, promptContent),
+			temperature: 0.2
 		},
 		supportsVision,
 		attachedImageCount: 0,

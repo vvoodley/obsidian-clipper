@@ -37,25 +37,34 @@ Go to **Settings → Interpreter → Add model**. Set the **Model ID** to the ex
 accounts/fireworks/models/kimi-k2p5
 ```
 
-### Disabling reasoning/thinking
+### Recommended settings for summarization
 
-Most Interpreter use cases — summarizing, extracting, tagging — don't benefit from extended reasoning. We recommend disabling it for faster and cheaper responses. In the model settings, add the following to **Extra API parameters JSON**:
+For summarization, extraction, and tagging tasks we recommend the following **Extra API parameters JSON** in model settings. Low temperature produces more consistent and factual outputs. Disabling reasoning/thinking avoids unnecessary overhead since these tasks don't require it.
+
+**For providers that use `thinking` (e.g. Fireworks AI with Kimi K2):**
 
 ```json
 {
+  "temperature": 0.2,
+  "max_tokens": 2048,
   "thinking": {
     "type": "disabled"
   }
 }
 ```
 
-Some providers use `reasoning_effort` instead:
+**For providers that use `reasoning_effort` (e.g. OpenAI o-series):**
 
 ```json
 {
+  "temperature": 0.2,
+  "max_tokens": 2048,
   "reasoning_effort": "none"
 }
 ```
+
+`temperature: 0.2` — keeps output deterministic and factual (range 0–1; lower = more focused).
+`max_tokens: 2048` — sufficient for most summaries; increase if outputs are being truncated.
 
 ### Optimizing the interpreter context
 
