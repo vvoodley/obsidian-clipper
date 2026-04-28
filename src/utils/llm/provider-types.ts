@@ -15,6 +15,14 @@ export interface BuildProviderRequestArgs {
 	visionCandidateCount?: number;
 }
 
+export interface BuildVisionBatchDescriptionRequestArgs {
+	provider: Provider;
+	model: ModelConfig;
+	systemContent: string;
+	userText: string;
+	visionImages: VisionImageAttachment[];
+}
+
 export interface BuiltProviderRequest {
 	requestBody: Record<string, unknown>;
 	supportsVision: boolean;

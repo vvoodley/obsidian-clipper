@@ -807,7 +807,9 @@ function addModelToList(event: Event) {
 		visionEnabled: false,
 		visionImageMode: 'url',
 		maxVisionImages: 8,
-		maxVisionImageBytes: 5_000_000
+		maxVisionImageBytes: 5_000_000,
+		visionBatchingEnabled: false,
+		visionBatchSize: 5
 	};
 	showModelModal(newModel);
 }
@@ -846,8 +848,10 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		const visionEnabledInput = form.querySelector('[name="visionEnabled"]') as HTMLInputElement;
 		const visionImageModeSelect = form.querySelector('[name="visionImageMode"]') as HTMLSelectElement;
 		const maxVisionImagesInput = form.querySelector('[name="maxVisionImages"]') as HTMLInputElement;
+		const visionBatchingEnabledInput = form.querySelector('[name="visionBatchingEnabled"]') as HTMLInputElement;
+		const visionBatchSizeInput = form.querySelector('[name="visionBatchSize"]') as HTMLInputElement;
 
-		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect || !extraRequestBodyInput || !visionEnabledInput || !visionImageModeSelect || !maxVisionImagesInput) {
+		if (!modelIdDescriptionContainer || !modelSelectionContainer || !modelSelectionRadios || !nameInput || !providerModelIdInput || !providerSelect || !extraRequestBodyInput || !visionEnabledInput || !visionImageModeSelect || !maxVisionImagesInput || !visionBatchingEnabledInput || !visionBatchSizeInput) {
 			console.error('Required model modal form elements not found');
 			return;
 		}
@@ -876,7 +880,9 @@ async function showModelModal(model: ModelConfig, index?: number) {
 		extraRequestBodyInput.value = model.extraRequestBody ? JSON.stringify(model.extraRequestBody, null, 2) : '';
 		visionEnabledInput.checked = model.visionEnabled === true;
 		visionImageModeSelect.value = model.visionImageMode || 'url';
-		maxVisionImagesInput.value = String(Math.max(0, Math.min(8, model.maxVisionImages ?? 8)));
+		maxVisionImagesInput.value = String(Math.max(0, Math.min(20, model.maxVisionImages ?? 8)));
+		visionBatchingEnabledInput.checked = model.visionBatchingEnabled === true;
+		visionBatchSizeInput.value = String(Math.max(1, Math.min(20, model.visionBatchSize ?? 5)));
 		nameInput.disabled = true;
 		providerModelIdInput.disabled = true;
 		modelSelectionContainer.style.display = 'none';
@@ -1049,8 +1055,10 @@ async function showModelModal(model: ModelConfig, index?: number) {
 				enabled: model.enabled,
 				visionEnabled: formData.get('visionEnabled') === 'on',
 				visionImageMode: (formData.get('visionImageMode') as VisionImageMode) || 'url',
-				maxVisionImages: Math.max(0, Math.min(8, Number(formData.get('maxVisionImages') || 8))),
-				maxVisionImageBytes: model.maxVisionImageBytes ?? 5_000_000
+				maxVisionImages: Math.max(0, Math.min(20, Number(formData.get('maxVisionImages') || 8))),
+				maxVisionImageBytes: model.maxVisionImageBytes ?? 5_000_000,
+				visionBatchingEnabled: formData.get('visionBatchingEnabled') === 'on',
+				visionBatchSize: Math.max(1, Math.min(20, Number(formData.get('visionBatchSize') || 5)))
 			};
 
 			updatedModel.name = formData.get('name') as string;

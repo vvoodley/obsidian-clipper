@@ -1242,8 +1242,16 @@ function getJobStatusMessage(job: InterpreterJob): string {
 	if (job.status === 'queued') return 'Queued...';
 	if (job.status === 'running') {
 		if (job.phase === 'validating') return `Validating captured page...${largeContext}`;
+		if (job.phase === 'planning_vision') return `Planning media/vision inputs...${largeContext}`;
+		if (job.phase === 'describing_vision_batches') {
+			const completed = job.visionBatchResults?.length || 0;
+			const total = job.metrics?.visionBatchCount || 0;
+			const partial = job.metrics?.visionBatchFailures ? ` Partial vision warnings: ${job.metrics.visionBatchFailures} batch issue(s).` : '';
+			return `Describing gallery images${total ? ` ${completed}/${total}` : ''}...${largeContext}${partial}`;
+		}
 		if (job.phase === 'sending_to_provider') return `Sending to AI provider...${largeContext}`;
 		if (job.phase === 'waiting_for_provider' && startedAt) return `Waiting for AI provider for ${formatDuration(now - startedAt)}...${largeContext}`;
+		if (job.phase === 'synthesizing_note') return `Synthesizing final note...${largeContext}`;
 		if (job.phase === 'parsing_response') return 'Parsing AI provider response...';
 		if (job.phase === 'building_note') return 'Building note...';
 		if (job.phase === 'saving_to_obsidian') return 'Adding to Obsidian...';

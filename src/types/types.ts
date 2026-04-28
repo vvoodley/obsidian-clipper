@@ -1,3 +1,5 @@
+import type { VisionImageSource } from '../utils/media/image-types';
+
 export interface Template {
 	id: string;
 	name: string;
@@ -113,6 +115,8 @@ export interface ModelConfig {
 	visionImageMode?: VisionImageMode;
 	maxVisionImages?: number;
 	maxVisionImageBytes?: number;
+	visionBatchingEnabled?: boolean;
+	visionBatchSize?: number;
 }
 
 export type InterpreterJobStatus = 'queued' | 'running' | 'completed' | 'saved' | 'error';
@@ -121,14 +125,51 @@ export type InterpreterJobPhase =
 	| 'queued'
 	| 'capturing'
 	| 'validating'
+	| 'planning_vision'
+	| 'describing_vision_batches'
 	| 'sending_to_provider'
 	| 'waiting_for_provider'
+	| 'synthesizing_note'
 	| 'parsing_response'
 	| 'building_note'
 	| 'saving_to_obsidian'
 	| 'closing_tab'
 	| 'done'
 	| 'error';
+
+export interface VisionBatchImageResult {
+	source: VisionImageSource;
+	index?: number;
+	url: string;
+	inspected: boolean;
+	status: 'described' | 'failed' | 'skipped';
+	mediaType?: string;
+	description?: string;
+	visibleText?: string;
+	uncertainty?: string;
+	error?: string;
+}
+
+export interface VisionBatchResult {
+	batchIndex: number;
+	totalBatches: number;
+	attempts: number;
+	startedAt: string;
+	completedAt?: string;
+	images: VisionBatchImageResult[];
+	error?: string;
+}
+
+export interface MediaDiagnostics {
+	imageCandidateCount?: number;
+	imageInspectedCount?: number;
+	imageSkippedCount?: number;
+	imageFailedCount?: number;
+	videoCandidateCount?: number;
+	hasVideoCandidates?: boolean;
+	deterministicTags?: string[];
+	warnings?: string[];
+}
 
 export interface InterpreterJobSnapshot {
 	tabId: number;
@@ -183,7 +224,16 @@ export interface InterpreterJob {
 		visionSources?: string[];
 		visionImageCountBySource?: Record<string, number>;
 		visionWarnings?: string[];
+		providerRequestCount?: number;
+		visionBatchingEnabled?: boolean;
+		visionBatchCount?: number;
+		visionBatchSize?: number;
+		visionBatchFailures?: number;
+		visionBatchRetries?: number;
+		finalSynthesisResponseChars?: number;
 	};
+	visionBatchResults?: VisionBatchResult[];
+	mediaDiagnostics?: MediaDiagnostics;
 	promptResponses?: any[];
 	interpreted?: {
 		noteName: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildProviderRequest } from './provider-request';
+import { buildProviderRequest, buildVisionBatchDescriptionRequest } from './provider-request';
 import type { ModelConfig, Provider } from '../../types/types';
 
 const provider: Provider = {
@@ -90,5 +90,21 @@ describe('provider request builder', () => {
 		});
 		expect(JSON.stringify(built.requestBody)).not.toContain('image_url');
 		expect(built.warnings.length).toBeGreaterThan(0);
+	});
+
+	it('uses OpenAI-compatible image_url content blocks for vision batch descriptions', () => {
+		const built = buildVisionBatchDescriptionRequest({
+			provider,
+			model,
+			systemContent: 'system',
+			userText: 'describe these',
+			visionImages: [{ sourceUrl: 'https://i.redd.it/1.jpg', remoteUrl: 'https://i.redd.it/1.jpg', source: 'post_gallery', index: 1 }]
+		});
+		const messages = built.requestBody.messages as any[];
+		expect(messages[1].content).toEqual([
+			{ type: 'text', text: 'describe these' },
+			{ type: 'image_url', image_url: { url: 'https://i.redd.it/1.jpg' } }
+		]);
+		expect(built.attachedImageCount).toBe(1);
 	});
 });

@@ -1,11 +1,13 @@
 import browser from './browser-polyfill';
-import { InterpreterJob, InterpreterJobSnapshot } from '../types/types';
+import { InterpreterJob, InterpreterJobSnapshot, VisionBatchResult } from '../types/types';
 import { loadSettings, generalSettings, incrementStat } from './storage-utils';
-import { sendToLLM, collectPromptVariablesFromTemplate, applyPromptResponsesToSnapshot } from './interpreter';
+import { sendToLLM, collectPromptVariablesFromTemplate, applyPromptResponsesToSnapshot, sendVisionBatchDescriptionToLLM } from './interpreter';
 import { generateFrontmatter, buildObsidianUrl } from './obsidian-note-creator';
 import { Template } from '../types/types';
 import type { InterpreterJobPhase } from '../types/types';
-import { prepareVisionInputsFromPromptContext } from './media/image-attachments';
+import { prepareVisionProcessingPlan } from './media/vision-plan';
+import { appendVisionBatchResultsToPromptContext } from './media/vision-batch-summary';
+import { addDeterministicMediaTagsToNoteContent, buildMediaDiagnostics } from './media/media-diagnostics';
 
 const STORAGE_KEY = 'interpreter_jobs';
 const runningJobs = new Map<string, Promise<InterpreterJob>>();
@@ -85,7 +87,11 @@ async function saveJobPhase(job: InterpreterJob, phase: InterpreterJobPhase, upd
 
 export function isJobStale(job: InterpreterJob, now = Date.now()): boolean {
 	if (!['queued', 'running'].includes(job.status) || !job.startedAt) return false;
-	return now - new Date(job.startedAt).getTime() > DEFAULT_JOB_TIMEOUT_MS;
+	const batchCount = job.metrics?.visionBatchCount ?? 0;
+	const timeoutMs = batchCount > 0
+		? Math.max(DEFAULT_JOB_TIMEOUT_MS, (batchCount + 1) * 300_000 + 60_000)
+		: DEFAULT_JOB_TIMEOUT_MS;
+	return now - new Date(job.startedAt).getTime() > timeoutMs;
 }
 
 async function markJobTimedOut(job: InterpreterJob): Promise<InterpreterJob> {
@@ -240,49 +246,145 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			context: job.snapshot.promptContext
 		};
 		const promptVariables = collectPromptVariablesFromTemplate(template);
-		const visionInputs = prepareVisionInputsFromPromptContext(job.snapshot.promptContext, model);
-		const visionImageCountBySource = visionInputs.visionImages.reduce((acc, image) => {
+		job = await saveJobPhase(job, 'planning_vision');
+		const visionPlan = prepareVisionProcessingPlan(job.snapshot.promptContext, model);
+		let mediaDiagnostics = buildMediaDiagnostics(job.snapshot.promptContext, visionPlan);
+		let visionBatchResults: VisionBatchResult[] = [];
+		const singleShotImages = visionPlan.selectedForSingleShot;
+		const visionImageCountBySource = singleShotImages.reduce((acc, image) => {
 			acc[image.source] = (acc[image.source] || 0) + 1;
 			return acc;
 		}, {} as Record<string, number>);
+
+		if (visionPlan.shouldBatch) {
+			job = await saveJobPhase(job, 'describing_vision_batches', {
+				metrics: {
+					...job.metrics,
+					providerName: provider?.name,
+					modelName: model.name,
+					promptContextChars: job.snapshot.promptContext.length,
+					contentChars: (job.snapshot.variables.content || '').length,
+					promptVariableCount: promptVariables.length,
+					visionEnabled: model.visionEnabled === true,
+					visionCandidateCount: visionPlan.candidateCount,
+					visionAttachedCount: visionPlan.plannedImageCount,
+					visionImageMode: model.visionImageMode || 'url',
+					visionBatchingEnabled: true,
+					visionBatchCount: visionPlan.batches.length,
+					visionBatchSize: visionPlan.batchSize,
+					providerRequestCount: 0,
+					visionWarnings: visionPlan.warnings
+				},
+				mediaDiagnostics
+			});
+
+			for (let index = 0; index < visionPlan.batches.length; index++) {
+				const batch = visionPlan.batches[index];
+				const startedAt = nowIso();
+				try {
+					const result = await sendVisionBatchDescriptionToLLM(job.snapshot.promptContext, batch, model, {
+						batchIndex: index + 1,
+						totalBatches: visionPlan.batches.length,
+						candidateCount: visionPlan.candidateCount
+					});
+					visionBatchResults.push({
+						batchIndex: index + 1,
+						totalBatches: visionPlan.batches.length,
+						attempts: result.attempts ?? 1,
+						startedAt,
+						completedAt: nowIso(),
+						images: result.images
+					});
+				} catch (error) {
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					visionBatchResults.push({
+						batchIndex: index + 1,
+						totalBatches: visionPlan.batches.length,
+						attempts: 3,
+						startedAt,
+						completedAt: nowIso(),
+						error: errorMessage,
+						images: batch.map(image => ({
+							source: image.source,
+							index: image.index,
+							url: image.remoteUrl || image.sourceUrl,
+							inspected: false,
+							status: 'failed',
+							error: errorMessage
+						}))
+					});
+				}
+				mediaDiagnostics = buildMediaDiagnostics(job.snapshot.promptContext, visionPlan, visionBatchResults);
+				const failures = visionBatchResults.filter(result => result.error || result.images.some(image => image.status === 'failed')).length;
+				const retries = visionBatchResults.reduce((sum, result) => sum + Math.max(0, result.attempts - 1), 0);
+				job = await saveJobPhase(job, 'describing_vision_batches', {
+					visionBatchResults,
+					mediaDiagnostics,
+					metrics: {
+						...job.metrics,
+						providerRequestCount: visionBatchResults.length,
+						visionBatchFailures: failures,
+						visionBatchRetries: retries
+					}
+				});
+			}
+		}
+
+		const finalPromptContext = visionPlan.shouldBatch
+			? appendVisionBatchResultsToPromptContext(job.snapshot.promptContext, visionBatchResults, mediaDiagnostics)
+			: job.snapshot.promptContext;
+
+		const finalVisionImages = visionPlan.shouldBatch ? [] : singleShotImages;
+		const finalVisionWarnings = visionPlan.warnings;
+		if (visionPlan.shouldBatch) {
+			job = await saveJobPhase(job, 'synthesizing_note');
+		}
 		job = await saveJobPhase(job, 'sending_to_provider', {
 			metrics: {
 				...job.metrics,
 				providerName: provider?.name,
 				modelName: model.name,
-				promptContextChars: job.snapshot.promptContext.length,
+				promptContextChars: finalPromptContext.length,
 				contentChars: (job.snapshot.variables.content || '').length,
 				promptVariableCount: promptVariables.length,
 				requestStartedAt: nowIso(),
 				visionEnabled: model.visionEnabled === true,
-				visionCandidateCount: visionInputs.candidateCount,
-				visionAttachedCount: visionInputs.visionImages.length,
+				visionCandidateCount: visionPlan.candidateCount,
+				visionAttachedCount: finalVisionImages.length,
 				visionImageMode: model.visionImageMode || 'url',
-				visionSources: visionInputs.visionImages.map(image => image.source),
+				visionSources: finalVisionImages.map(image => image.source),
 				visionImageCountBySource,
-				visionWarnings: visionInputs.warnings
-			}
+				visionWarnings: finalVisionWarnings,
+				visionBatchingEnabled: visionPlan.batchingEnabled,
+				visionBatchCount: visionPlan.shouldBatch ? visionPlan.batches.length : 0,
+				visionBatchSize: visionPlan.batchSize,
+				providerRequestCount: (job.metrics?.providerRequestCount ?? 0) + 1
+			},
+			visionBatchResults,
+			mediaDiagnostics
 		});
 		job = await saveJobPhase(job, 'waiting_for_provider');
 		const { promptResponses, responseChars } = await sendToLLM(
-			job.snapshot.promptContext,
+			finalPromptContext,
 			job.snapshot.variables.content || '',
 			promptVariables,
 			model,
 			{
-				visionImages: visionInputs.visionImages,
-				visionCandidateCount: visionInputs.candidateCount,
-				visionWarnings: visionInputs.warnings
+				visionImages: finalVisionImages,
+				visionCandidateCount: visionPlan.candidateCount,
+				visionWarnings: finalVisionWarnings
 			}
 		);
 		job = await saveJobPhase(job, 'building_note', {
 			metrics: {
 				...job.metrics,
 				responseReceivedAt: nowIso(),
-				responseChars
+				responseChars,
+				finalSynthesisResponseChars: responseChars
 			}
 		});
 		const interpreted = applyPromptResponsesToSnapshot(job.snapshot, promptVariables, promptResponses);
+		interpreted.noteContent = addDeterministicMediaTagsToNoteContent(interpreted.noteContent, mediaDiagnostics);
 		const frontmatter = await generateFrontmatter(interpreted.properties);
 		const fileContent = frontmatter + interpreted.noteContent;
 

@@ -1,4 +1,4 @@
-import type { BuildProviderRequestArgs, BuiltProviderRequest } from './provider-types';
+import type { BuildProviderRequestArgs, BuildVisionBatchDescriptionRequestArgs, BuiltProviderRequest } from './provider-types';
 import type { VisionImageAttachment } from '../media/image-types';
 
 function buildAttachedVisionStatus(visionImages: VisionImageAttachment[]): string {
@@ -22,12 +22,12 @@ const DISABLED_VISION_STATUS = `VISION INPUT STATUS:
 Image candidate URLs were captured, but this model did not attach them as vision inputs.
 Do not infer visual contents from URLs alone.`;
 
-function isFireworksOpenAICompatible(args: BuildProviderRequestArgs): boolean {
+function isFireworksOpenAICompatible(args: Pick<BuildProviderRequestArgs, 'provider'>): boolean {
 	return args.provider.baseUrl.includes('api.fireworks.ai/inference/v1')
 		|| args.provider.name.toLowerCase().includes('fireworks');
 }
 
-function isDefaultOpenAICompatible(args: BuildProviderRequestArgs): boolean {
+function isDefaultOpenAICompatible(args: Pick<BuildProviderRequestArgs, 'provider'>): boolean {
 	const name = args.provider.name.toLowerCase();
 	const baseUrl = args.provider.baseUrl.toLowerCase();
 	return !name.includes('hugging')
@@ -70,6 +70,66 @@ function buildOpenAICompatibleVisionContent(promptContext: string, promptContent
 	}
 
 	return content;
+}
+
+function buildRawOpenAICompatibleVisionContent(userText: string, visionImages: VisionImageAttachment[]) {
+	const content: Array<Record<string, unknown>> = [{ type: 'text', text: userText }];
+	for (const image of visionImages) {
+		if (!image.remoteUrl) continue;
+		content.push({
+			type: 'image_url',
+			image_url: {
+				url: image.remoteUrl
+			}
+		});
+	}
+	return content;
+}
+
+export function buildVisionBatchDescriptionRequest(args: BuildVisionBatchDescriptionRequestArgs): BuiltProviderRequest {
+	const supportsVision = (isFireworksOpenAICompatible(args) || isDefaultOpenAICompatible(args))
+		&& !args.provider.baseUrl.includes('openai.azure.com');
+	const warnings: string[] = [];
+	const canAttachImages = args.model.visionEnabled === true
+		&& supportsVision
+		&& (args.model.visionImageMode || 'url') === 'url'
+		&& args.visionImages.length > 0;
+
+	if (!canAttachImages) {
+		if (args.model.visionEnabled !== true) {
+			warnings.push('Vision batch description skipped because vision is disabled for this model.');
+		} else if (!supportsVision) {
+			warnings.push(`Vision batch description skipped because provider "${args.provider.name}" does not support OpenAI-compatible image content blocks in this implementation.`);
+		} else if ((args.model.visionImageMode || 'url') !== 'url') {
+			warnings.push(`Vision batch description skipped because vision image mode "${args.model.visionImageMode}" is not implemented for batching.`);
+		}
+		return {
+			requestBody: {
+				model: args.model.providerModelId,
+				messages: [
+					{ role: 'system', content: args.systemContent },
+					{ role: 'user', content: args.userText }
+				]
+			},
+			supportsVision,
+			attachedImageCount: 0,
+			warnings
+		};
+	}
+
+	return {
+		requestBody: {
+			model: args.model.providerModelId,
+			messages: [
+				{ role: 'system', content: args.systemContent },
+				{ role: 'user', content: buildRawOpenAICompatibleVisionContent(args.userText, args.visionImages) }
+			],
+			temperature: 0.1
+		},
+		supportsVision,
+		attachedImageCount: args.visionImages.length,
+		warnings
+	};
 }
 
 export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProviderRequest {

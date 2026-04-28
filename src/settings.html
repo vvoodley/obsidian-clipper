@@ -849,10 +849,28 @@
 						<div class="setting-item">
 							<div class="setting-item-info">
 								<label for="max-vision-images">Max images per request</label>
-								<div class="setting-item-description">Limited to 8 for this workflow: up to 4 main post images and up to 4 quoted/embedded post images.</div>
+								<div class="setting-item-description">Per-request image limit. Use batching for larger Reddit/gallery posts.</div>
 							</div>
 							<div class="setting-item-control">
-								<input type="number" id="max-vision-images" name="maxVisionImages" min="0" max="8" value="8">
+								<input type="number" id="max-vision-images" name="maxVisionImages" min="0" max="20" value="8">
+							</div>
+						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
+								<label for="vision-batching-enabled">Enable vision batching</label>
+								<div class="setting-item-description">When captured images exceed the per-request limit, describe images in batches and synthesize one final note.</div>
+							</div>
+							<div class="setting-item-control">
+								<input type="checkbox" id="vision-batching-enabled" name="visionBatchingEnabled">
+							</div>
+						</div>
+						<div class="setting-item">
+							<div class="setting-item-info">
+								<label for="vision-batch-size">Vision batch size</label>
+								<div class="setting-item-description">Images per batch request. This is clamped to the max images per request.</div>
+							</div>
+							<div class="setting-item-control">
+								<input type="number" id="vision-batch-size" name="visionBatchSize" min="1" max="20" value="5">
 							</div>
 						</div>
 						<div class="setting-item">
