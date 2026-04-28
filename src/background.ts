@@ -109,6 +109,40 @@ if (typeof browser !== 'undefined' && browser.webRequest?.onBeforeSendHeaders) {
 	} catch { /* webRequest not available */ }
 }
 
+// Firefox: inject Access-Control-Allow-Origin on AI provider responses that lack it.
+// Firefox enforces CORS even for extension background pages when the server does not
+// return CORS headers, unlike Chrome which exempts extension pages via host_permissions.
+// Only patches responses for requests originating from this extension (background page
+// or popup), leaving requests from normal web content unaffected.
+if (typeof browser !== 'undefined' && browser.webRequest?.onHeadersReceived) {
+	try {
+		browser.webRequest.onHeadersReceived.addListener(
+			(details) => {
+				// Only patch requests that originated from this extension.
+				// Background-script fetches have tabId === -1.
+				// Popup/options-page fetches have documentUrl or originUrl with extension scheme.
+				const documentUrl = (details as any).documentUrl as string | undefined;
+				const originUrl = (details as any).originUrl as string | undefined;
+				const fromExtension = details.tabId === -1
+					|| documentUrl?.startsWith('moz-extension://')
+					|| documentUrl?.startsWith('safari-web-extension://')
+					|| originUrl?.startsWith('moz-extension://')
+					|| originUrl?.startsWith('safari-web-extension://');
+				if (!fromExtension) return {};
+
+				const headers = details.responseHeaders || [];
+				if (headers.some(h => h.name.toLowerCase() === 'access-control-allow-origin')) {
+					return {};
+				}
+				headers.push({ name: 'Access-Control-Allow-Origin', value: '*' });
+				return { responseHeaders: headers };
+			},
+			{ urls: ['https://*/*'], types: ['xmlhttprequest'] as any },
+			['blocking', 'responseHeaders']
+		);
+	} catch { /* webRequest not available */ }
+}
+
 let sidePanelOpenWindows: Set<number> = new Set();
 let highlighterModeState: { [tabId: number]: boolean } = {};
 let readerModeState: { [tabId: number]: boolean } = {};

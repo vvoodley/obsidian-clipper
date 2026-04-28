@@ -91,6 +91,7 @@ There is no log file — all diagnostic output goes to the browser's extension c
 This typically means the fetch to the AI provider failed before a response was received. Common causes:
 
 - **Wrong Base URL** — ensure the URL ends with `/chat/completions`, e.g. `https://api.fireworks.ai/inference/v1/chat/completions`. A missing or incorrect path suffix is the most common mistake.
+- **Firefox CORS error (CORS header 'Access-Control-Allow-Origin' missing)** — Firefox enforces CORS for extension pages even when `host_permissions` covers the URL. If the AI provider does not return `Access-Control-Allow-Origin` response headers, Firefox will block the response with status 200. This extension injects the missing header automatically via `webRequest.onHeadersReceived`. If you see this error, make sure you are running a build from source (see [Developers](#developers)) rather than the published version if it predates this fix.
 - **Background page suspended (Firefox)** — Firefox may suspend the background event page mid-request on long runs. Check the extension console for the actual error.
 - **API key missing or invalid** — verify your API key is set correctly in provider settings.
 - **Provider CORS policy** — if you see a CORS error in the console alongside the NetworkError, the provider may not accept requests from browser extension origins.
