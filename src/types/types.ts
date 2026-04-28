@@ -233,6 +233,7 @@ export interface InterpreterJob {
 		visionBatchSkippedCount?: number;
 		visionBatchFailures?: number;
 		visionBatchRetries?: number;
+		finalSynthesisAttempts?: number;
 		finalSynthesisResponseChars?: number;
 	};
 	visionBatchResults?: VisionBatchResult[];

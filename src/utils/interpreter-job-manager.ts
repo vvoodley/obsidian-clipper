@@ -377,7 +377,7 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			mediaDiagnostics
 		});
 		job = await saveJobPhase(job, 'waiting_for_provider');
-		const { promptResponses, responseChars } = await sendToLLM(
+		const { promptResponses, responseChars, attempts: finalSynthesisAttempts = 1 } = await sendToLLM(
 			finalPromptContext,
 			job.snapshot.variables.content || '',
 			promptVariables,
@@ -395,6 +395,8 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 				...job.metrics,
 				responseReceivedAt: nowIso(),
 				responseChars,
+				providerRequestCount: (job.metrics?.visionBatchAttemptCount ?? 0) + finalSynthesisAttempts,
+				finalSynthesisAttempts,
 				finalSynthesisResponseChars: responseChars
 			}
 		});

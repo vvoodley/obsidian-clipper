@@ -58,6 +58,14 @@ To define a more targeted context use [[Variables#Selector variables|selector va
 
  This would only run Interpreter on the `#main` element of a web page, if it exists. [[Filters#HTML processing|HTML processing filters]] like `remove_html`, `strip_tags` and `strip_attr` can be useful to further reduce the context length and speed up processing.
 
+## Vision image batching
+
+This fork includes opt-in vision image input support for OpenAI-compatible providers that accept `image_url` message content blocks. The implemented image transport is URL-based; data URL fallback is reserved for future work.
+
+Vision batching currently runs in the background **Interpret and Add** job path. The manual **interpret** button in the popup still uses the one-shot Interpreter path unless it is refactored later.
+
+In batch mode, `maxVisionImages` is the per-request image cap, not the total gallery cap. `visionBatchSize` defaults to `5` and is clamped to the provider/model per-request limit, so a gallery with more images is described in multiple vision requests and then synthesized into one final text request.
+
 ## Models
 
 > [!warning] Privacy

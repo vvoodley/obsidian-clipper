@@ -127,6 +127,7 @@ describe('sendToLLM timeout and parsing', () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(result.promptResponses[0].user_response).toBe('summary after retry');
+		expect(result.attempts).toBe(2);
 		vi.useRealTimers();
 	});
 

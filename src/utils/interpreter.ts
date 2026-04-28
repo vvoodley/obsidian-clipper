@@ -159,7 +159,7 @@ export async function sendToLLM(
 		suppressDisabledVisionStatus?: boolean;
 		visionEvidenceMode?: 'attached_images' | 'batched_notes';
 	}
-): Promise<{ promptResponses: any[]; responseChars?: number }> {
+): Promise<{ promptResponses: any[]; responseChars?: number; attempts?: number }> {
 	debugLog('Interpreter', 'Sending request to LLM...');
 	
 	// Find the provider for this model
@@ -218,7 +218,7 @@ export async function sendToLLM(
 			}
 		});
 
-		const { result } = await withProviderRetries(async () => {
+		const { result, attempts } = await withProviderRetries(async () => {
 			const responseText = await postProviderRequest(provider, requestUrl, headers, requestBody);
 
 			debugLog('Interpreter', `Raw ${provider.name} response:`, responseText);
@@ -272,7 +272,10 @@ export async function sendToLLM(
 			};
 		}, { retryLabel: `${provider.name} final interpretation` });
 
-		return result;
+		return {
+			...result,
+			attempts
+		};
 	} catch (error) {
 		console.error(`Error sending to ${provider.name} LLM:`, error);
 		throw error;
