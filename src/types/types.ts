@@ -165,6 +165,7 @@ export interface MediaDiagnostics {
 	imageInspectedCount?: number;
 	imageSkippedCount?: number;
 	imageFailedCount?: number;
+	videoCandidateUrls?: string[];
 	videoCandidateCount?: number;
 	hasVideoCandidates?: boolean;
 	deterministicTags?: string[];

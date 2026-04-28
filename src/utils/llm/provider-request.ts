@@ -22,6 +22,11 @@ const DISABLED_VISION_STATUS = `VISION INPUT STATUS:
 Image candidate URLs were captured, but this model did not attach them as vision inputs.
 Do not infer visual contents from URLs alone.`;
 
+const BATCHED_VISION_EVIDENCE_STATUS = `VISION INPUT STATUS:
+BATCHED_VISION_NOTES in this prompt are prior visual evidence produced from attached image inputs.
+Use those notes as inspected visual evidence.
+No additional image inputs are attached to this final synthesis request, and you must not infer visual contents from URLs alone.`;
+
 function isFireworksOpenAICompatible(args: Pick<BuildProviderRequestArgs, 'provider'>): boolean {
 	return args.provider.baseUrl.includes('api.fireworks.ai/inference/v1')
 		|| args.provider.name.toLowerCase().includes('fireworks');
@@ -132,6 +137,18 @@ export function buildVisionBatchDescriptionRequest(args: BuildVisionBatchDescrip
 	};
 }
 
+export function getAttachedVisionImageCountForProvider(
+	provider: BuildProviderRequestArgs['provider'],
+	model: BuildProviderRequestArgs['model'],
+	visionImages: VisionImageAttachment[]
+): number {
+	const supportsVision = isFireworksOpenAICompatible({ provider }) || isDefaultOpenAICompatible({ provider });
+	const mode = model.visionImageMode || 'url';
+	return model.visionEnabled === true && supportsVision && mode === 'url'
+		? visionImages.filter(image => Boolean(image.remoteUrl)).length
+		: 0;
+}
+
 export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProviderRequest {
 	const { provider, model, systemContent, promptContent } = args;
 	const requestedVisionImages = args.visionImages || [];
@@ -145,7 +162,9 @@ export function buildProviderRequest(args: BuildProviderRequestArgs): BuiltProvi
 	const warnings: string[] = [];
 	let promptContext = args.promptContext;
 
-	if (candidateCount > 0 && !canAttachImages) {
+	if (args.visionEvidenceMode === 'batched_notes') {
+		promptContext = withVisionStatus(promptContext, BATCHED_VISION_EVIDENCE_STATUS);
+	} else if (candidateCount > 0 && !canAttachImages && !args.suppressDisabledVisionStatus) {
 		promptContext = withVisionStatus(promptContext, DISABLED_VISION_STATUS);
 		if (model.visionEnabled !== true) {
 			warnings.push('Vision image candidates were captured, but vision is disabled for this model.');

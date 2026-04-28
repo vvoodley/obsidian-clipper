@@ -8,22 +8,33 @@ function unique(values: string[]): string[] {
 }
 
 export function extractVideoCandidateUrls(promptContext: string): string[] {
-	const urls = promptContext.match(URL_REGEX) || [];
-	return unique(urls.filter(url =>
-		/v\.redd\.it|og:video|video|\.mp4|\.m3u8/i.test(url)
-	));
+	const strongVideoUrls = (promptContext.match(URL_REGEX) || []).filter(url =>
+		/v\.redd\.it|\.mp4(?:[?#]|$)|\.m3u8(?:[?#]|$)|\.webm(?:[?#]|$)|\.mov(?:[?#]|$)/i.test(url)
+	);
+	const sectionUrls: string[] = [];
+	const lines = promptContext.split(/\r?\n/);
+	for (let index = 0; index < lines.length; index++) {
+		if (!/(video candidates|reddit video candidates|possible videos|og:video)/i.test(lines[index])) continue;
+		for (let offset = 0; offset <= 12 && index + offset < lines.length; offset++) {
+			const line = lines[index + offset];
+			if (offset > 0 && /^\s*(?:#{1,6}\s+|[A-Z][A-Z _-]{6,}:)\s*/.test(line) && !/(video|og:video)/i.test(line)) break;
+			sectionUrls.push(...(line.match(URL_REGEX) || []));
+		}
+	}
+	return unique([...strongVideoUrls, ...sectionUrls]);
 }
 
 export function buildMediaDiagnostics(
 	promptContext: string,
 	plan: VisionProcessingPlan,
-	batchResults: VisionBatchResult[] = []
+	batchResults: VisionBatchResult[] = [],
+	options: { singleShotAttachedCount?: number } = {}
 ): MediaDiagnostics {
 	const videoCandidateUrls = extractVideoCandidateUrls(promptContext);
 	const imageResults = batchResults.flatMap(result => result.images);
 	const imageInspectedCount = imageResults.length > 0
 		? imageResults.filter(image => image.inspected && image.status === 'described').length
-		: plan.selectedForSingleShot.length;
+		: options.singleShotAttachedCount ?? 0;
 	const imageFailedCount = imageResults.filter(image => image.status === 'failed').length;
 	const imageSkippedCount = Math.max(0, plan.candidateCount - imageInspectedCount - imageFailedCount);
 	const deterministicTags: string[] = [];
@@ -33,7 +44,7 @@ export function buildMediaDiagnostics(
 	if (videoCandidateUrls.length > 0) deterministicTags.push('media/has-video-candidate', 'workflow/needs-video-download');
 	if (imageSkippedCount > 0) deterministicTags.push('media/has-uninspected-images', 'workflow/needs-media-review');
 	if (imageFailedCount > 0) deterministicTags.push('media/vision-partial', 'workflow/needs-media-review');
-	if (plan.candidateCount > 0 && imageInspectedCount === 0 && !plan.shouldBatch && plan.selectedForSingleShot.length === 0) {
+	if (plan.candidateCount > 0 && imageInspectedCount === 0 && !plan.shouldBatch) {
 		deterministicTags.push('media/vision-not-run', 'workflow/needs-media-review');
 	}
 
@@ -42,6 +53,7 @@ export function buildMediaDiagnostics(
 		imageInspectedCount,
 		imageSkippedCount,
 		imageFailedCount,
+		videoCandidateUrls,
 		videoCandidateCount: videoCandidateUrls.length,
 		hasVideoCandidates: videoCandidateUrls.length > 0,
 		deterministicTags: unique(deterministicTags),

@@ -156,6 +156,8 @@ export async function sendToLLM(
 		visionImages?: VisionImageAttachment[];
 		visionCandidateCount?: number;
 		visionWarnings?: string[];
+		suppressDisabledVisionStatus?: boolean;
+		visionEvidenceMode?: 'attached_images' | 'batched_notes';
 	}
 ): Promise<{ promptResponses: any[]; responseChars?: number }> {
 	debugLog('Interpreter', 'Sending request to LLM...');
@@ -192,7 +194,9 @@ export async function sendToLLM(
 			promptContext,
 			promptContent,
 			visionImages: options?.visionImages,
-			visionCandidateCount: options?.visionCandidateCount
+			visionCandidateCount: options?.visionCandidateCount,
+			suppressDisabledVisionStatus: options?.suppressDisabledVisionStatus,
+			visionEvidenceMode: options?.visionEvidenceMode
 		});
 		requestBody = builtRequest.requestBody;
 		const visionWarnings = Array.from(new Set([
@@ -214,57 +218,61 @@ export async function sendToLLM(
 			}
 		});
 
-		const responseText = await postProviderRequest(provider, requestUrl, headers, requestBody);
+		const { result } = await withProviderRetries(async () => {
+			const responseText = await postProviderRequest(provider, requestUrl, headers, requestBody);
 
-		debugLog('Interpreter', `Raw ${provider.name} response:`, responseText);
+			debugLog('Interpreter', `Raw ${provider.name} response:`, responseText);
 
-		let data;
-		try {
-			data = JSON.parse(responseText);
-		} catch (error) {
-			console.error('Error parsing JSON response:', error);
-			throw new Error(`Failed to parse response from ${provider.name}`);
-		}
+			let data;
+			try {
+				data = JSON.parse(responseText);
+			} catch (error) {
+				console.error('Error parsing JSON response:', error);
+				throw new Error(`Failed to parse response from ${provider.name}`);
+			}
 
-		debugLog('Interpreter', `Parsed ${provider.name} response:`, data);
+			debugLog('Interpreter', `Parsed ${provider.name} response:`, data);
 
-		let llmResponseContent: string;
-		if (provider.name.toLowerCase().includes('anthropic')) {
-			// Handle Anthropic's nested content structure
-			const textContent = data.content[0]?.text;
-			if (textContent) {
-				try {
-					// Try to parse the inner content first
-					const parsed = JSON.parse(textContent);
-					llmResponseContent = JSON.stringify(parsed);
-				} catch {
-					// If parsing fails, use the raw text
-					llmResponseContent = textContent;
+			let llmResponseContent: string;
+			if (provider.name.toLowerCase().includes('anthropic')) {
+				// Handle Anthropic's nested content structure
+				const textContent = data.content[0]?.text;
+				if (textContent) {
+					try {
+						// Try to parse the inner content first
+						const parsed = JSON.parse(textContent);
+						llmResponseContent = JSON.stringify(parsed);
+					} catch {
+						// If parsing fails, use the raw text
+						llmResponseContent = textContent;
+					}
+				} else {
+					llmResponseContent = JSON.stringify(data);
+				}
+			} else if (provider.name.toLowerCase().includes('ollama')) {
+				const messageContent = data.message?.content;
+				if (messageContent) {
+					try {
+						const parsed = JSON.parse(messageContent);
+						llmResponseContent = JSON.stringify(parsed);
+					} catch {
+						llmResponseContent = messageContent;
+					}
+				} else {
+					llmResponseContent = JSON.stringify(data);
 				}
 			} else {
-				llmResponseContent = JSON.stringify(data);
+				llmResponseContent = data.choices[0]?.message?.content || JSON.stringify(data);
 			}
-		} else if (provider.name.toLowerCase().includes('ollama')) {
-			const messageContent = data.message?.content;
-			if (messageContent) {
-				try {
-					const parsed = JSON.parse(messageContent);
-					llmResponseContent = JSON.stringify(parsed);
-				} catch {
-					llmResponseContent = messageContent;
-				}
-			} else {
-				llmResponseContent = JSON.stringify(data);
-			}
-		} else {
-			llmResponseContent = data.choices[0]?.message?.content || JSON.stringify(data);
-		}
-		debugLog('Interpreter', 'Processed LLM response:', llmResponseContent);
+			debugLog('Interpreter', 'Processed LLM response:', llmResponseContent);
 
-		return {
-			...parseLLMResponse(llmResponseContent, promptVariables),
-			responseChars: llmResponseContent.length
-		};
+			return {
+				...parseLLMResponse(llmResponseContent, promptVariables),
+				responseChars: llmResponseContent.length
+			};
+		}, { retryLabel: `${provider.name} final interpretation` });
+
+		return result;
 	} catch (error) {
 		console.error(`Error sending to ${provider.name} LLM:`, error);
 		throw error;
@@ -411,28 +419,49 @@ function parseLLMResponse(responseContent: string, promptVariables: PromptVariab
 function extractJsonObject(text: string): any {
 	try {
 		return JSON.parse(text);
-	} catch {
+	} catch (directError) {
 		const match = text.match(/\{[\s\S]*\}/);
 		if (!match) throw new Error('No JSON object found in response');
-		return JSON.parse(match[0]);
+		try {
+			return JSON.parse(match[0]);
+		} catch (matchError) {
+			const message = matchError instanceof Error ? matchError.message : String(matchError || directError);
+			throw new Error(`Failed to parse assistant JSON response: ${message}`);
+		}
 	}
 }
 
-function normalizeVisionBatchResults(rawImages: any[], images: VisionImageAttachment[]): VisionBatchImageResult[] {
+export function normalizeVisionBatchResults(rawImages: any[], images: VisionImageAttachment[]): VisionBatchImageResult[] {
 	return images.map((image, index) => {
-		const raw = rawImages[index] || {};
-		const status = raw.status === 'failed' || raw.status === 'skipped' ? raw.status : 'described';
+		const raw = rawImages[index];
+		const missingResultError = 'Provider response did not include a result for this image.';
+		if (!raw || typeof raw !== 'object') {
+			return {
+				source: image.source,
+				index: image.index,
+				url: image.remoteUrl || image.sourceUrl,
+				inspected: false,
+				status: 'failed',
+				error: missingResultError
+			};
+		}
+		const description = typeof raw.description === 'string' ? raw.description : undefined;
+		const visibleText = typeof raw.visibleText === 'string' ? raw.visibleText : undefined;
+		const uncertainty = typeof raw.uncertainty === 'string' ? raw.uncertainty : undefined;
+		const hasEvidence = [description, visibleText, uncertainty].some(value => String(value || '').trim().length > 0);
+		const requestedStatus = raw.status === 'failed' || raw.status === 'skipped' || raw.status === 'described' ? raw.status : undefined;
+		const status = requestedStatus === 'described' && !hasEvidence ? 'failed' : (requestedStatus || (hasEvidence ? 'described' : 'failed'));
 		return {
 			source: image.source,
 			index: image.index,
 			url: image.remoteUrl || image.sourceUrl,
-			inspected: status === 'described',
+			inspected: status === 'described' && hasEvidence,
 			status,
 			mediaType: typeof raw.mediaType === 'string' ? raw.mediaType : undefined,
-			description: typeof raw.description === 'string' ? raw.description : undefined,
-			visibleText: typeof raw.visibleText === 'string' ? raw.visibleText : undefined,
-			uncertainty: typeof raw.uncertainty === 'string' ? raw.uncertainty : undefined,
-			error: typeof raw.error === 'string' ? raw.error : undefined
+			description,
+			visibleText,
+			uncertainty,
+			error: typeof raw.error === 'string' ? raw.error : status === 'failed' ? 'Provider response did not include usable visual evidence for this image.' : undefined
 		};
 	});
 }
@@ -501,16 +530,21 @@ Return exactly one JSON object:
 
 	const requestBody = mergeExtraRequestBody(built.requestBody, model.extraRequestBody);
 	const { requestUrl, headers } = buildProviderRequestTransport(provider, model);
-	const { result: responseText, attempts } = await withProviderRetries(
-		() => postProviderRequest(provider, requestUrl, headers, requestBody),
+	const { result, attempts } = await withProviderRetries(
+		async () => {
+			const responseText = await postProviderRequest(provider, requestUrl, headers, requestBody);
+			const data = JSON.parse(responseText);
+			const content = data.choices?.[0]?.message?.content || responseText;
+			const parsed = extractJsonObject(content);
+			return {
+				images: normalizeVisionBatchResults(Array.isArray(parsed.images) ? parsed.images : [], images),
+				responseChars: String(content).length
+			};
+		},
 		{ retryLabel: `vision batch ${options.batchIndex}` }
 	);
-	const data = JSON.parse(responseText);
-	const content = data.choices?.[0]?.message?.content || responseText;
-	const parsed = extractJsonObject(content);
 	return {
-		images: normalizeVisionBatchResults(Array.isArray(parsed.images) ? parsed.images : [], images),
-		responseChars: String(content).length,
+		...result,
 		attempts
 	};
 }

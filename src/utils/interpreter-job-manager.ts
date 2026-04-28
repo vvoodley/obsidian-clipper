@@ -8,6 +8,7 @@ import type { InterpreterJobPhase } from '../types/types';
 import { prepareVisionProcessingPlan } from './media/vision-plan';
 import { appendVisionBatchResultsToPromptContext } from './media/vision-batch-summary';
 import { addDeterministicMediaTagsToNoteContent, buildMediaDiagnostics } from './media/media-diagnostics';
+import { getAttachedVisionImageCountForProvider } from './llm/provider-request';
 
 const STORAGE_KEY = 'interpreter_jobs';
 const runningJobs = new Map<string, Promise<InterpreterJob>>();
@@ -248,9 +249,14 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 		const promptVariables = collectPromptVariablesFromTemplate(template);
 		job = await saveJobPhase(job, 'planning_vision');
 		const visionPlan = prepareVisionProcessingPlan(job.snapshot.promptContext, model);
-		let mediaDiagnostics = buildMediaDiagnostics(job.snapshot.promptContext, visionPlan);
 		let visionBatchResults: VisionBatchResult[] = [];
 		const singleShotImages = visionPlan.selectedForSingleShot;
+		const singleShotAttachedCount = provider
+			? getAttachedVisionImageCountForProvider(provider, model, singleShotImages)
+			: 0;
+		let mediaDiagnostics = buildMediaDiagnostics(job.snapshot.promptContext, visionPlan, [], {
+			singleShotAttachedCount: visionPlan.shouldBatch ? 0 : singleShotAttachedCount
+		});
 		const visionImageCountBySource = singleShotImages.reduce((acc, image) => {
 			acc[image.source] = (acc[image.source] || 0) + 1;
 			return acc;
@@ -297,10 +303,13 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 					});
 				} catch (error) {
 					const errorMessage = error instanceof Error ? error.message : String(error);
+					const attempts = error && typeof error === 'object' && typeof (error as { attempts?: unknown }).attempts === 'number'
+						? (error as { attempts: number }).attempts
+						: 1;
 					visionBatchResults.push({
 						batchIndex: index + 1,
 						totalBatches: visionPlan.batches.length,
-						attempts: 3,
+						attempts,
 						startedAt,
 						completedAt: nowIso(),
 						error: errorMessage,
@@ -372,7 +381,9 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			{
 				visionImages: finalVisionImages,
 				visionCandidateCount: visionPlan.candidateCount,
-				visionWarnings: finalVisionWarnings
+				visionWarnings: finalVisionWarnings,
+				suppressDisabledVisionStatus: visionPlan.shouldBatch,
+				visionEvidenceMode: visionPlan.shouldBatch ? 'batched_notes' : 'attached_images'
 			}
 		);
 		job = await saveJobPhase(job, 'building_note', {
@@ -384,9 +395,8 @@ async function runInterpreterJob(job: InterpreterJob): Promise<InterpreterJob> {
 			}
 		});
 		const interpreted = applyPromptResponsesToSnapshot(job.snapshot, promptVariables, promptResponses);
-		interpreted.noteContent = addDeterministicMediaTagsToNoteContent(interpreted.noteContent, mediaDiagnostics);
 		const frontmatter = await generateFrontmatter(interpreted.properties);
-		const fileContent = frontmatter + interpreted.noteContent;
+		const fileContent = addDeterministicMediaTagsToNoteContent(frontmatter + interpreted.noteContent, mediaDiagnostics);
 
 		job = await saveJobPhase(job, job.addToObsidianWhenDone ? 'saving_to_obsidian' : 'done', {
 			...job,

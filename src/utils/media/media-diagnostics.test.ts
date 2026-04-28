@@ -33,6 +33,39 @@ https://v.redd.it/example`)).toEqual([
 		expect(diagnostics.deterministicTags).toContain('workflow/needs-video-download');
 	});
 
+	it('does not treat arbitrary URLs containing video as video candidates outside video sections', () => {
+		expect(extractVideoCandidateUrls('https://example.com/articles/video-game-guide')).toEqual([]);
+		expect(extractVideoCandidateUrls(`Reddit video candidates:
+https://example.com/articles/video-game-guide`)).toEqual(['https://example.com/articles/video-game-guide']);
+	});
+
+	it('marks single-shot unsupported provider diagnostics as vision not run', () => {
+		const diagnostics = buildMediaDiagnostics('', {
+			...basePlan,
+			candidateCount: 2,
+			selectedForSingleShot: [
+				{ sourceUrl: 'https://i.redd.it/1.jpg', remoteUrl: 'https://i.redd.it/1.jpg', source: 'post_gallery', index: 1 }
+			]
+		}, [], { singleShotAttachedCount: 0 });
+
+		expect(diagnostics.imageInspectedCount).toBe(0);
+		expect(diagnostics.deterministicTags).toContain('media/vision-not-run');
+		expect(diagnostics.deterministicTags).toContain('workflow/needs-media-review');
+	});
+
+	it('counts single-shot images as inspected only when they were attached', () => {
+		const diagnostics = buildMediaDiagnostics('', {
+			...basePlan,
+			candidateCount: 1,
+			selectedForSingleShot: [
+				{ sourceUrl: 'https://i.redd.it/1.jpg', remoteUrl: 'https://i.redd.it/1.jpg', source: 'post_gallery', index: 1 }
+			]
+		}, [], { singleShotAttachedCount: 1 });
+
+		expect(diagnostics.imageInspectedCount).toBe(1);
+		expect(diagnostics.deterministicTags).not.toContain('media/vision-not-run');
+	});
+
 	it('adds partial vision tags when a batch image failed', () => {
 		const batchResults: VisionBatchResult[] = [{
 			batchIndex: 1,
@@ -66,6 +99,28 @@ Body`;
 		expect(result).toContain('  - source/reddit');
 		expect(result).toContain('  - media/vision-batched');
 		expect(result).toContain('  - workflow/needs-media-review');
+	});
+
+	it('inserts deterministic tags into generated full file frontmatter', () => {
+		const fileContent = `---
+created: 2026-01-01
+---
+---
+schema: embedded_template
+tags:
+  - source/reddit
+---
+
+Body`;
+		const result = addDeterministicMediaTagsToNoteContent(fileContent, {
+			deterministicTags: ['media/vision-batched']
+		});
+
+		expect(result).toContain(`created: 2026-01-01
+tags:
+  - media/vision-batched
+---`);
+		expect(result).toContain('schema: embedded_template');
 	});
 
 	it('does not duplicate existing tags', () => {

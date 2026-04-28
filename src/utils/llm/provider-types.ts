@@ -13,6 +13,8 @@ export interface BuildProviderRequestArgs {
 	promptContent: PromptContent;
 	visionImages?: VisionImageAttachment[];
 	visionCandidateCount?: number;
+	suppressDisabledVisionStatus?: boolean;
+	visionEvidenceMode?: 'attached_images' | 'batched_notes';
 }
 
 export interface BuildVisionBatchDescriptionRequestArgs {

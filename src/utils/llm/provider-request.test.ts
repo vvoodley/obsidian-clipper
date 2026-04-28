@@ -79,6 +79,38 @@ describe('provider request builder', () => {
 		expect(JSON.stringify(built.requestBody)).not.toContain('image_url');
 	});
 
+	it('suppresses disabled vision status for final batched synthesis and adds batched evidence status', () => {
+		const built = buildProviderRequest({
+			provider,
+			model,
+			systemContent: 'system',
+			promptContext: 'context\n\nBATCHED_VISION_NOTES_START\nImage notes\nBATCHED_VISION_NOTES_END',
+			promptContent: { prompts: { prompt_1: 'summary' } },
+			visionCandidateCount: 3,
+			suppressDisabledVisionStatus: true,
+			visionEvidenceMode: 'batched_notes'
+		});
+
+		const body = JSON.stringify(built.requestBody);
+		expect(body).toContain('BATCHED_VISION_NOTES in this prompt are prior visual evidence');
+		expect(body).not.toContain('Image candidate URLs were captured, but this model did not attach them');
+		expect(body).not.toContain('image_url');
+	});
+
+	it('can suppress disabled vision status without adding batched evidence status', () => {
+		const built = buildProviderRequest({
+			provider,
+			model,
+			systemContent: 'system',
+			promptContext: 'context',
+			promptContent: { prompts: { prompt_1: 'summary' } },
+			visionCandidateCount: 2,
+			suppressDisabledVisionStatus: true
+		});
+
+		expect(JSON.stringify(built.requestBody)).not.toContain('Image candidate URLs were captured, but this model did not attach them');
+	});
+
 	it('falls back to text-only with a warning for unsupported providers', () => {
 		const built = buildProviderRequest({
 			provider: { ...provider, name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1/messages' },
